@@ -1,0 +1,2 @@
+# lootbox
+Serokell Toolbox
