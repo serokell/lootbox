@@ -16,9 +16,6 @@ packages:
   # for serialise
   - cborg-0.2.0.0
 
-  # for serokell-util
-  - time-units-1.0.0
-
 flags:
   serialise:
     newtime15: true
