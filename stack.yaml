@@ -1,0 +1,8 @@
+resolver: snapshot.yaml
+
+packages:
+  - code/base
+  - code/network
+
+ghc-options:
+  "$locals": -Wall
