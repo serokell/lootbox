@@ -61,6 +61,8 @@ Reviewing pull requests
 * If your review was requested but you think this is a mistake, remove
   the request and request a review from someone else, who you think is
   a more appropriate reviewer for the PR in question.
+* If your review was not requested but you want to have a chance to review the
+  PR before it is being merged, request a review from yourself.
 * Always ask questions. If you are not sure what a piece of code does, ask
   a question. If you are not sure why a piece of code is written the way it is,
   ask a question. If you are not sure what is going on, ask a question.
@@ -73,6 +75,9 @@ Reviewing pull requests
 * If you are the last of those whose review was requested and all the comments
   are minor and can be addressed reasonably quickly, after posting your
   comments you may make the required changes yourself, push and approve.
+* If you are the last one to review the PR and everyone whose review
+  was requested approved it, merge the PR, delete the branch and update
+  the state of the issue.
 
 
 [git-commit]:  https://chris.beams.io/posts/git-commit/
