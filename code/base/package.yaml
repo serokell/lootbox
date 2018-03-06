@@ -12,4 +12,5 @@ tests:
     <<: *test-common
 
     dependencies:
+      - tasty
       - tasty-discover
