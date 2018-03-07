@@ -10,6 +10,11 @@ packages:
 
   - git: https://github.com/int-index/caps
     commit: 858e76d8d92d683ff75f298ff39ca6b24daafaac
+  
+  - git: https://github.com/sipa/bech32
+    commit: bfc716715b5d7d853526cc6b43ff36388aaeb1c2
+    subdirs:
+    - ref/haskell
 
   # for log-warper
   - o-clock-0.1.0
