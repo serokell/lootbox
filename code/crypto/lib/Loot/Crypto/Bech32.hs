@@ -20,7 +20,6 @@ encode :: ConvertUtf8 t ByteString =>
     HumanReadablePart
     -> ByteString
     -> Either Bech32EncodeError t
-
 encode hrp d=
     let encoded = B32.bech32Encode hrp . B32.toBase32 . BS.unpack $ d
     in  decodeUtf8 <$> fromEncoded encoded
@@ -38,6 +37,7 @@ base32FromText t = case B32.bech32Decode . encodeUtf8 $ t of
     Just b32 -> Right b32
     Nothing  -> Left InvalidStringFormat
 
+toBase256 :: [B32.Word5] -> Either Bech32DecodeError [Word8]
 toBase256 d = case B32.toBase256 d of
     Just res -> Right res
     Nothing  -> Left InvalidBitPadding
