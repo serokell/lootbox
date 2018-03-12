@@ -3,8 +3,9 @@ resolver: lts-10.7
 
 packages:
   - log-warper-1.8.9
+  - rocksdb-haskell-1.0.0
   - serialise-0.2.0.0
-  - serokell-util-0.6.0
+  - serokell-util-0.8.0
   - universum-1.1.0
 
   - git: https://github.com/int-index/caps

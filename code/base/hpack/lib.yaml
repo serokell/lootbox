@@ -8,6 +8,7 @@ extra-source-files: [README.md]
 
 default-extensions:
   - ApplicativeDo
+  - DataKinds
   - DeriveGeneric
   - FlexibleContexts
   - FlexibleInstances
@@ -17,6 +18,7 @@ default-extensions:
   - NoImplicitPrelude
   - OverloadedStrings
   - RankNTypes
+  - RecordWildCards
   - ScopedTypeVariables
   - TemplateHaskell
   - TupleSections

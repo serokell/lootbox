@@ -4,6 +4,9 @@ packages:
   - code/base
   - code/network
 
+nix:
+  shell-file: shell-stack.nix
+
 ghc-options:
   "$locals": -Wall
              -Wincomplete-uni-patterns
