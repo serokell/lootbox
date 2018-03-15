@@ -5,12 +5,34 @@ name: loot-base
 library:
   <<: *lib-common
 
-  dependencies: []
+  dependencies:
+    - bytestring
+    - caps
+    - conduit
+    - data-default
+    - directory
+    - mtl
+    - resourcet
+    - rocksdb-haskell
+    - serialise
+    - serokell-util
+    - transformers-base
 
 tests:
   loot-base-test:
     <<: *test-common
 
     dependencies:
+      - HUnit
       - tasty
       - tasty-discover
+      - tasty-hedgehog
+      - tasty-hunit
+
+      - loot-base
+
+      - caps
+      - conduit
+      - directory
+      - temporary
+      - transformers-base
