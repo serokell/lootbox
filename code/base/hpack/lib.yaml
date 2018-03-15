@@ -1,0 +1,54 @@
+version:            '0.0.0.0'
+author:             Serokell
+maintainer:         hi@serokell.io
+copyright:          2018 Serokell
+license:            MPL-2.0
+github:             serokell/lootbox
+extra-source-files: [README.md]
+
+default-extensions:
+  - ApplicativeDo
+  - DeriveGeneric
+  - FlexibleContexts
+  - FlexibleInstances
+  - GeneralizedNewtypeDeriving
+  - LambdaCase
+  - NamedFieldPuns
+  - NoImplicitPrelude
+  - OverloadedStrings
+  - RankNTypes
+  - ScopedTypeVariables
+  - TemplateHaskell
+  - TupleSections
+  - TypeApplications
+
+dependencies:
+  - base >=4.7 && <5
+  - universum
+
+
+ghc-options:
+  - -Wall
+
+when:
+  - condition:   os(linux)
+    ghc-options: -optl-fuse-ld=gold
+    ld-options:  -fuse-ld=gold
+
+
+_lib:
+  - &lib-common
+      source-dirs: lib
+
+  - &test-common
+      main:        Test.hs
+      source-dirs: test
+
+      ghc-options:
+        - -threaded
+        - -rtsopts
+        - -with-rtsopts=-N
+
+  - &exec-common
+      ghc-options:
+        - -threaded

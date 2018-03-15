@@ -1,0 +1,21 @@
+name: lootbox-snapshot
+resolver: lts-10.7
+
+packages:
+  - log-warper-1.8.9
+  - serialise-0.2.0.0
+  - serokell-util-0.6.0
+  - universum-1.1.0
+
+  - git: https://github.com/int-index/caps
+    commit: 858e76d8d92d683ff75f298ff39ca6b24daafaac
+
+  # for log-warper
+  - o-clock-0.1.0
+
+  # for serialise
+  - cborg-0.2.0.0
+
+flags:
+  serialise:
+    newtime15: true

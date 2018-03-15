@@ -1,0 +1,16 @@
+<<: !include "hpack/lib.yaml"
+
+name: loot-base
+
+library:
+  <<: *lib-common
+
+  dependencies: []
+
+tests:
+  loot-base-test:
+    <<: *test-common
+
+    dependencies:
+      - tasty
+      - tasty-discover
