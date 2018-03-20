@@ -2,15 +2,43 @@
 
 name: loot-network
 
-library:
-  <<: *lib-common
+dependencies:
+- async-combinators
+- base >= 4.7 && < 5
+- universum
+- log-warper
+- async
+- HUnit
+- unliftio-core
+- unliftio
+- unordered-containers
+- bytestring
+- kan-extensions
+- list-t
+- fmt
+- network
+- network-transport
+- network-transport-tcp
+- stm-containers
+- cryptonite
+- transformers
+- mtl
+- hashable
+- serialise
+- stm
+- tasty
+- tasty-hunit
 
-  dependencies: []
+library:
+  source-dirs: src
 
 tests:
-  loot-base-test:
-    <<: *test-common
-
+  loot-network-test:
+    main:                Test.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
     dependencies:
-      - tasty
-      - tasty-discover
+    - loot-network
