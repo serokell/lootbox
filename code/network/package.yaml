@@ -3,31 +3,30 @@
 name: loot-network
 
 dependencies:
+- async
 - async-combinators
 - base >= 4.7 && < 5
-- universum
-- log-warper
-- async
-- HUnit
-- unliftio-core
-- unliftio
-- unordered-containers
 - bytestring
-- kan-extensions
-- list-t
+- cryptonite
 - fmt
+- hashable
+- HUnit
+- log-warper
+- list-t
 - network
 - network-transport
 - network-transport-tcp
-- stm-containers
-- cryptonite
 - transformers
 - mtl
-- hashable
 - serialise
 - stm
+- stm-containers
 - tasty
 - tasty-hunit
+- universum
+- unliftio-core
+- unliftio
+- unordered-containers
 
 library:
   source-dirs: src
