@@ -15,6 +15,7 @@ default-extensions:
   - LambdaCase
   - NamedFieldPuns
   - NoImplicitPrelude
+  - OverloadedLabels
   - OverloadedStrings
   - RankNTypes
   - ScopedTypeVariables

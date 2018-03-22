@@ -5,6 +5,7 @@ packages:
   - log-warper-1.8.9
   - serialise-0.2.0.0
   - serokell-util-0.6.0
+  - vinyl-0.8.1.1
   - universum-1.1.0
 
   - git: https://github.com/int-index/caps

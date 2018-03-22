@@ -2,10 +2,10 @@ resolver: snapshot.yaml
 
 packages:
   - code/base
+  - code/config
   - code/network
 
 ghc-options:
   "$locals": -Wall
              -Wincomplete-uni-patterns
              -Wincomplete-record-updates
-             -Wmissing-import-lists
