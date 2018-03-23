@@ -1,0 +1,27 @@
+name: loot-demo
+
+library:
+  source-dirs: lib
+
+  dependencies:
+    - base
+    - universum
+
+    - loot-config
+
+executables:
+  loot-demo:
+    source-dirs: app
+    main: Main.hs
+
+    dependencies:
+      - loot-demo
+
+      - base
+      - universum
+
+      - loot-config
+      - yaml
+
+ghc-options:
+  - -Wall

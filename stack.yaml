@@ -5,6 +5,8 @@ packages:
   - code/config
   - code/network
 
+  - code/demo
+
 ghc-options:
   "$locals": -Wall
              -Wincomplete-uni-patterns
