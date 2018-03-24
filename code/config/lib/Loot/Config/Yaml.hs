@@ -16,43 +16,44 @@ import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault, to
 import Data.Vinyl (Rec ((:&), RNil))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 
-import Loot.Config.Record ((:::), (::<), ConfigKind (Partial), ConfigRec, Item (Item))
+import Loot.Config.Record ((:::), (::<), ConfigKind (Partial), ConfigRec,
+                           Item (ItemOptionP, ItemSub), ItemKind)
 
 
 -- | This class is almost like 'FromJSON' but uses @aeson-better-errors@.
-class OptionsFromJson (fs :: [*]) where
+class OptionsFromJson (is :: [ItemKind]) where
     -- | Parser for configuration.
-    configParser :: Parse e (ConfigRec 'Partial fs)
+    configParser :: Parse e (ConfigRec 'Partial is)
 
 instance OptionsFromJson '[] where
     configParser = pure RNil
 
 instance
-    forall l v fs.
+    forall l v is.
         ( KnownSymbol l
         , FromJSON v
-        , OptionsFromJson fs)
-    => OptionsFromJson ((l ::: v) ': fs)
+        , OptionsFromJson is)
+    => OptionsFromJson ((l ::: v) ': is)
   where
-    configParser = (:&) <$> fmap Item parseOption <*> configParser
+    configParser = (:&) <$> fmap ItemOptionP parseOption <*> configParser
       where
         parseOption :: Parse e (Maybe v)
         parseOption = keyMay (fromString $ symbolVal (Proxy :: Proxy l)) fromAesonParser
 
 instance
-    forall l us fs.
+    forall l us is.
         ( KnownSymbol l
         , Monoid (ConfigRec 'Partial us)
         , OptionsFromJson us
-        , OptionsFromJson fs
+        , OptionsFromJson is
         )
-    => OptionsFromJson ((l ::< us) ': fs)
+    => OptionsFromJson ((l ::< us) ': is)
   where
-    configParser = (:&) <$> fmap Item parseSub <*> configParser
+    configParser = (:&) <$> fmap ItemSub parseSub <*> configParser
       where
         parseSub :: Parse e (ConfigRec 'Partial us)
         parseSub = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
 
 
-instance OptionsFromJson fs => FromJSON (ConfigRec 'Partial fs) where
+instance OptionsFromJson is => FromJSON (ConfigRec 'Partial is) where
     parseJSON = toAesonParser' configParser

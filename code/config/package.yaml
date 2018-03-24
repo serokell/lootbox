@@ -9,7 +9,6 @@ library:
     - aeson
     - aeson-better-errors
     - microlens
-    - microlens-th
     - validation
     - vinyl
 
