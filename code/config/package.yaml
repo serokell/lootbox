@@ -1,0 +1,28 @@
+<<: !include "../base/hpack/lib.yaml"
+
+name: loot-config
+
+library:
+  <<: *lib-common
+
+  dependencies:
+    - aeson
+    - aeson-better-errors
+    - microlens
+    - validation
+    - vinyl
+
+tests:
+  loot-base-test:
+    <<: *test-common
+
+    dependencies:
+      - loot-config
+
+      - hedgehog
+      - tasty
+      - tasty-discover
+      - tasty-hedgehog
+      - tasty-hunit
+
+      - aeson
