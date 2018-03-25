@@ -104,7 +104,7 @@ itemSubLabel _ = symbolVal (Proxy :: Proxy l)
 
 
 -- | Require that all labels in the configuration are known.
-type family LabelsKnown i :: Constraint where
+type family LabelsKnown is :: Constraint where
     LabelsKnown '[]       = ()
     LabelsKnown ((l ::: _)  ': is) = (KnownSymbol l, LabelsKnown is)
     LabelsKnown ((l ::< us) ': is) = (KnownSymbol l, LabelsKnown us, LabelsKnown is)
@@ -112,7 +112,7 @@ type family LabelsKnown i :: Constraint where
 -- | Require that all types of options satisfy a constraint.
 type family ValuesConstrained c is :: Constraint where
     ValuesConstrained _ '[]       = ()
-    ValuesConstrained c ((l ::: v)  ': is) = (c v, ValuesConstrained c is)
+    ValuesConstrained c ((_ ::: v)  ': is) = (c v, ValuesConstrained c is)
     ValuesConstrained c ((_ ::< us) ': is) =
         ( ValuesConstrained c us
         , ValuesConstrained c is
@@ -179,13 +179,13 @@ type family ItemType l is where
 
 
 -- | Check whether a configuration of kind @k@ contains an item of type @l ::: v@.
-type HasOption k l is v =
+type HasOption l is v =
     ( RecElem Rec (l ::: v) is (RIndex (l ::: v) is)
     , ItemType l is ~ (l ::: v)
     )
 
 -- | Lens that focuses on the configuration option with the given label.
-option :: forall k l v g is a. (Functor g, a ~ Item' k (l ::: v), HasOption k l is v)
+option :: forall k l v g is a. (Functor g, a ~ Item' k (l ::: v), HasOption l is v)
     => Label l
     -> (a -> g a)
     -> ConfigRec k is
@@ -194,13 +194,13 @@ option _ = rlens (Proxy :: Proxy (l ::: v)) . cfgItem
 
 
 -- | Check whether the configuration has the subsection.
-type HasSub k l is us =
+type HasSub l is us =
     ( RecElem Rec (l ::< us) is (RIndex (l ::< us) is)
-    , Item' k (ItemType l is) ~ ConfigRec k us
+    , ItemType l is ~ (l ::< us)
     )
 
 -- | Lens that focuses on the subsection option with the given label.
-sub :: forall k l us g is a. (Functor g, a ~ Item' k (l ::< us), HasSub k l is us)
+sub :: forall k l us g is a. (Functor g, a ~ Item' k (l ::< us), HasSub l is us)
     => Label l
     -> (a -> g a)
     -> ConfigRec k is
