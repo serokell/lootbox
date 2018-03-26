@@ -1,7 +1,5 @@
 <<: !include "../base/hpack/lib.yaml"
 
-name: loot-network
-
 dependencies:
 - async
 - async-combinators
@@ -30,6 +28,8 @@ dependencies:
 
 library:
   source-dirs: src
+
+name: loot-network
 
 tests:
   loot-network-test:
