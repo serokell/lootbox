@@ -16,3 +16,6 @@ tests:
     dependencies:
       - tasty
       - tasty-discover
+      - tasty-hunit
+
+      - loot-crypto

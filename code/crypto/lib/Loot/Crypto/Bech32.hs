@@ -1,6 +1,7 @@
 module Loot.Crypto.Bech32
-    (
-          HumanReadablePart
+    (     DecodeError (..)
+        , EncodeError (..)
+        , HumanReadablePart
         , encode
         , decode
     )
@@ -8,7 +9,8 @@ module Loot.Crypto.Bech32
 
 import Universum
 
-import Codec.Binary.Bech32 (DecodeError, EncodeError, bech32Decode, bech32Encode, fromWord5, word5)
+import Codec.Binary.Bech32 (DecodeError (..), EncodeError (..), bech32Decode, bech32Encode,
+                            fromWord5, word5)
 
 import qualified Data.ByteString as BS
 
