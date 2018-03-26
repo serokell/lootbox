@@ -53,11 +53,11 @@ import Network.Transport (Connection (close, send), ConnectionId,
 import Network.Transport.TCP (TCPAddr (Unaddressable), createTransport, defaultTCPAddr,
                               defaultTCPParameters)
 import System.IO.Error (userError)
-import System.Wlog (LoggerNameBox, WithLoggerIO, logDebug, logError, logWarning)
-import UnliftIO.Async (wait, withAsync)
+import System.Wlog (LoggerNameBox, WithLoggerIO, askLoggerName, liftLogIO, logDebug, logError,
+                    logWarning, usingLoggerName)
+import UnliftIO.Async (async, wait, withAsync)
 
 import Fmt ((+||), (||+))
-import Log (asyncLog, liftLogIO2, withAsyncLog)
 
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BSL
@@ -152,7 +152,7 @@ withClient host port cids timeout cont = do
                 res <- cont $ ClientContext (catMaybes $ (flip HM.lookup m) <$> cids) sendingSet
                 atomically $ writeTVar stopping True
                 -- give node some time to gracefully terminate
-                withAsyncLog (liftIO (threadDelay timeout) >> killAll sendingSet)
+                withAsync (liftIO (threadDelay timeout) >> killAll sendingSet)
                     -- firstly wait for all the queues to become empty
                     $ const $ waitForEmptyQueues m *> waitUnfinished sendingSet
                 liftIO $ closeEndPoint ep
@@ -202,11 +202,11 @@ withClient host port cids timeout cont = do
         loop = do
             (cid, a) <- atomically $ readTChan outChan
             let sending = liftIO $ send upCon $ toChunks $ serialise (cid, a) :: LoggerNameBox IO AsyncResult
-            asyncSending <- asyncLog sending
+            asyncSending <- liftLogIO async sending
             -- TODO: https://github.com/serokell/ale-core/pull/101#discussion_r163435324
             atomically $ STMSet.insert asyncSending sendingSet
             -- run second thread to wait first
-            void $ asyncLog $ do
+            void $ liftLogIO async $ do
                 whenLeftM (liftIO $ waitCatch asyncSending) (\e -> logError $ "Error: ("+||e||+")")
                 atomically $ STMSet.delete asyncSending sendingSet
             loop
@@ -307,7 +307,7 @@ withServer host port cids timeout cont = do
                 res <- cont $ ServerContext (catMaybes $ (flip HM.lookup m) <$> cids) sendingSet
                 atomically $ writeTVar stopping True
                 -- give node some time to gracefully terminate
-                withAsyncLog (liftIO (threadDelay timeout) >> killAll sendingSet)
+                withAsync (liftIO (threadDelay timeout) >> killAll sendingSet)
                     -- firstly wait for all the queues to become empty
                     $ const $ waitForEmptyQueues m *> waitUnfinished sendingSet
                 liftIO $ closeEndPoint ep
@@ -366,11 +366,11 @@ withServer host port cids timeout cont = do
                         pure $ Left (TransportError SendFailed "Fail to connect")
                     Right con -> let sendAction = send con . toChunks $ serialise (cid, a)
                                  in  liftIO $ sendAction `finally` close con
-            asyncSending <- asyncLog sending
+            asyncSending <- liftLogIO async sending
             -- TODO: https://github.com/serokell/ale-core/pull/101#discussion_r163435324
             atomically $ STMSet.insert asyncSending sendingSet
             -- run second thread to wait first
-            void $ asyncLog $ do
+            void $ liftLogIO async $ do
                 whenLeftM (liftIO $ waitCatch asyncSending) (\e -> logError $ "Error: ("+||e||+")")
                 atomically $ STMSet.delete asyncSending sendingSet
             loop
@@ -440,3 +440,8 @@ waitUnfinished sendingSet = atomically $ unlessM condition retry
         threadStates <- traverse pollSTM stms
         let allSendingThreadsAreDead = all isJust threadStates
         pure allSendingThreadsAreDead
+
+liftLogIO2 :: WithLoggerIO m => (IO a -> IO b -> IO c)
+           -> LoggerNameBox IO a -> LoggerNameBox IO b -> m c
+liftLogIO2 f a b = askLoggerName >>= \l -> liftIO $
+    f (usingLoggerName l a) (usingLoggerName l b)
