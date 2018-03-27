@@ -1,6 +1,7 @@
 resolver: snapshot.yaml
 
 packages:
+  - code/async
   - code/base
   - code/config
   - code/network

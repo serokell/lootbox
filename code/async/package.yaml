@@ -1,0 +1,26 @@
+<<: !include "../base/hpack/lib.yaml"
+
+name: loot-async
+
+library:
+  <<: *lib-common
+
+  dependencies:
+    - async
+    - safe-exceptions
+    - unliftio
+
+tests:
+  loot-async-test:
+    <<: *test-common
+
+    dependencies:
+      - loot-async
+
+      - hedgehog
+      - tasty
+      - tasty-discover
+      - tasty-hedgehog
+      - tasty-hunit
+
+      - safe-exceptions
