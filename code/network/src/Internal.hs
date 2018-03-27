@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | Internals of networking subsystem.
 --
 -- The internals of networking are not typed, which means that we send and receive
@@ -27,6 +28,8 @@ module Internal
        , RawServerComponentMap
        , withServer
        , serverReply
+       -- logging
+       , setupLogging
        ) where
 
 import Universum
@@ -39,7 +42,7 @@ import Control.Concurrent.STM (retry)
 import Control.Concurrent.STM.TChan (TChan, isEmptyTChan, newTChanIO, readTChan, writeTChan)
 import Control.Exception (ioError)
 import Control.Monad.Except (MonadError (throwError), runExcept)
-import Control.Monad.IO.Unlift (MonadUnliftIO)
+import Control.Monad.IO.Unlift (MonadUnliftIO (..), UnliftIO (..), withUnliftIO)
 import Control.Monad.Trans.Except (except)
 import Data.ByteString.Lazy (fromChunks, toChunks)
 import Data.Hashable (Hashable (hash, hashWithSalt))
@@ -53,8 +56,9 @@ import Network.Transport (Connection (close, send), ConnectionId,
 import Network.Transport.TCP (TCPAddr (Unaddressable), createTransport, defaultTCPAddr,
                               defaultTCPParameters)
 import System.IO.Error (userError)
-import System.Wlog (LoggerNameBox, WithLoggerIO, askLoggerName, liftLogIO, logDebug, logError,
-                    logWarning, usingLoggerName)
+import System.Wlog (LoggerName, LoggerNameBox (..), WithLoggerIO, askLoggerName,
+                    buildAndSetupYamlLogging, liftLogIO, logDebug, logError, logWarning,
+                    loggerNameBoxEntry, productionB, usingLoggerName)
 import UnliftIO.Async (async, wait, withAsync)
 
 import Fmt ((+||), (||+))
@@ -68,6 +72,10 @@ import qualified STMContainers.Set as STMSet (Set, delete, deleteAll, insert, ne
 instance Hashable (Async a) where
     hash = hash . asyncThreadId
     hashWithSalt s a = hashWithSalt s (asyncThreadId a)
+
+instance MonadUnliftIO m => MonadUnliftIO (LoggerNameBox m) where
+    askUnliftIO = LoggerNameBox $ ReaderT $ \r -> withUnliftIO $ \u ->
+        pure (UnliftIO (unliftIO u . flip runReaderT r . loggerNameBoxEntry))
 
 -- {-# ANN module ("HLint: ignore Reduce duplication" :: Text) #-}
 
@@ -441,7 +449,12 @@ waitUnfinished sendingSet = atomically $ unlessM condition retry
         let allSendingThreadsAreDead = all isJust threadStates
         pure allSendingThreadsAreDead
 
-liftLogIO2 :: WithLoggerIO m => (IO a -> IO b -> IO c)
+setupLogging :: MonadUnliftIO m => LoggerName -> LoggerNameBox m a -> m a
+setupLogging logName action = do
+    buildAndSetupYamlLogging productionB "log-config.yaml"
+    usingLoggerName logName action
+
+liftLogIO2 :: (MonadUnliftIO m, WithLoggerIO m) => (IO a -> IO b -> IO c)
            -> LoggerNameBox IO a -> LoggerNameBox IO b -> m c
 liftLogIO2 f a b = askLoggerName >>= \l -> liftIO $
     f (usingLoggerName l a) (usingLoggerName l b)
