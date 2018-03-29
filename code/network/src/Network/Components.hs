@@ -13,7 +13,7 @@
 -- where @cid@ is the identifier of the component that sent the message.
 -- This pair is being serialised using 'serialise' because it seems to be
 -- the simplest way to reliably send a pair over our chosen transport.
-module Internal
+module Network.Components
        ( ComponentId
 
        , RawClientComponent (..)
@@ -57,8 +57,8 @@ import Network.Transport.TCP (TCPAddr (Unaddressable), createTransport, defaultT
                               defaultTCPParameters)
 import System.IO.Error (userError)
 import System.Wlog (LoggerName, LoggerNameBox (..), WithLoggerIO, askLoggerName,
-                    buildAndSetupYamlLogging, liftLogIO, logDebug, logError, logWarning,
-                    loggerNameBoxEntry, productionB, usingLoggerName)
+                    buildAndSetupYamlLogging, logDebug, logError, logWarning, loggerNameBoxEntry,
+                    productionB, usingLoggerName)
 import UnliftIO.Async (async, wait, withAsync)
 
 import Fmt ((+||), (||+))
@@ -142,13 +142,13 @@ withClient host port cids timeout cont = do
     -- Create channels for routing incoming messages to components.
     m <- foldlM (setupComponent outChan stopping) HM.empty (heartbeatId:cids)
 
-    let runRouteIncoming = liftLogIO2 finally
-                               (routeIncoming ep m)
-                               (logDebug "Stopping routeIncoming")
+    let runRouteIncoming = finally
+                           (routeIncoming ep m)
+                           (logDebug "Stopping routeIncoming")
 
-    let runForwardOutgoing = liftLogIO2 finally
-                                 (forwardOutgoing upCon outChan sendingSet)
-                                 (logDebug "Stopping forwardOutgoing")
+    let runForwardOutgoing = finally
+                             (forwardOutgoing upCon outChan sendingSet)
+                             (logDebug "Stopping forwardOutgoing")
 
     let heartbeatComp = fromMaybe
             (error "impossible: heartbeat component was not inserted to map")
@@ -199,7 +199,7 @@ withClient host port cids timeout cont = do
             EndPointClosed -> pass  -- terminate
             ErrorEvent evnt -> logError ("Error : ("+||evnt||+")") *> throwM evnt
 
-    forwardOutgoing :: forall m . (WithLoggerIO m, MonadMask m)
+    forwardOutgoing :: forall m . (WithLoggerIO m, MonadMask m, MonadUnliftIO m)
                     => Connection
                     -> TChan (ComponentId, BSL.ByteString)
                     -> STMSet.Set (Async AsyncResult)
@@ -209,12 +209,12 @@ withClient host port cids timeout cont = do
         loop :: m ()
         loop = do
             (cid, a) <- atomically $ readTChan outChan
-            let sending = liftIO $ send upCon $ toChunks $ serialise (cid, a) :: LoggerNameBox IO AsyncResult
-            asyncSending <- liftLogIO async sending
+            let sending = liftIO $ send upCon $ toChunks $ serialise (cid, a)
+            asyncSending <- async sending
             -- TODO: https://github.com/serokell/ale-core/pull/101#discussion_r163435324
             atomically $ STMSet.insert asyncSending sendingSet
             -- run second thread to wait first
-            void $ liftLogIO async $ do
+            void $  async $ do
                 whenLeftM (liftIO $ waitCatch asyncSending) (\e -> logError $ "Error: ("+||e||+")")
                 atomically $ STMSet.delete asyncSending sendingSet
             loop
@@ -357,7 +357,7 @@ withServer host port cids timeout cont = do
             EndPointClosed -> pass
             ErrorEvent e -> logError ("Error: ("+||e||+")") *> loop conMap
 
-    forwardOutgoing :: forall m . (WithLoggerIO m, MonadMask m)
+    forwardOutgoing :: forall m . (WithLoggerIO m, MonadMask m, MonadUnliftIO m)
                     => EndPoint
                     -> TChan (EndPointAddress, (ComponentId, BSL.ByteString))
                     -> STMSet.Set (Async AsyncResult)
@@ -367,18 +367,18 @@ withServer host port cids timeout cont = do
         loop :: m ()
         loop = do
             (ea, (cid, a)) <- atomically $ readTChan outChan
-            let sending :: LoggerNameBox IO AsyncResult
-                sending = liftIO (connect ep ea ReliableOrdered defaultConnectHints) >>= \case
+            -- let sending :: MonadUnliftIO m => LoggerNameBox IO AsyncResult
+            let sending = liftIO (connect ep ea ReliableOrdered defaultConnectHints) >>= \case
                     Left e -> do
                         logError $ "Error: ("+||e||+")"
                         pure $ Left (TransportError SendFailed "Fail to connect")
                     Right con -> let sendAction = send con . toChunks $ serialise (cid, a)
                                  in  liftIO $ sendAction `finally` close con
-            asyncSending <- liftLogIO async sending
+            asyncSending <- async sending
             -- TODO: https://github.com/serokell/ale-core/pull/101#discussion_r163435324
             atomically $ STMSet.insert asyncSending sendingSet
             -- run second thread to wait first
-            void $ liftLogIO async $ do
+            void $  async $ do
                 whenLeftM (liftIO $ waitCatch asyncSending) (\e -> logError $ "Error: ("+||e||+")")
                 atomically $ STMSet.delete asyncSending sendingSet
             loop
@@ -453,8 +453,3 @@ setupLogging :: MonadUnliftIO m => LoggerName -> LoggerNameBox m a -> m a
 setupLogging logName action = do
     buildAndSetupYamlLogging productionB "log-config.yaml"
     usingLoggerName logName action
-
-liftLogIO2 :: (MonadUnliftIO m, WithLoggerIO m) => (IO a -> IO b -> IO c)
-           -> LoggerNameBox IO a -> LoggerNameBox IO b -> m c
-liftLogIO2 f a b = askLoggerName >>= \l -> liftIO $
-    f (usingLoggerName l a) (usingLoggerName l b)

@@ -1,9 +1,9 @@
-module Test.Running where
+module Test.Components where
 
 import Universum
 
-import Internal (ClientContext (..), ServerContext (..), clientRequest, serverReply, setupLogging,
-                 withClient, withServer)
+import Network.Components (ClientContext (..), ServerContext (..), clientRequest, serverReply,
+                           setupLogging, withClient, withServer)
 import Test.HUnit (Test (..), runTestTT)
 import UnliftIO.Async (async)
 
