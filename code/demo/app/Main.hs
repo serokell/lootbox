@@ -10,9 +10,13 @@
 module Main where
 
 import Data.Yaml (decodeFileEither)
+import Fmt (listF, (+|), (|+))
+import Monad.Capabilities (emptyCaps)
 
-import Loot.Config (finalise, option, sub, (?~))
-import Loot.Demo.Config (ConfigPart)
+import Loot.Config (finalise, option, sub)
+import Loot.Demo.Config (ConfigPart, defaultConfig)
+import Loot.Log (logCritical, logDebug, logInfo)
+import Loot.Log.Warper (withLogWarper)
 
 
 configPath :: FilePath
@@ -20,21 +24,24 @@ configPath = "code/demo/app/config.yaml"
 
 
 main :: IO ()
-main = do
+main = usingReaderT emptyCaps $ do
     cfgPart <- loadConfig
-    case finalise (cfgPart & option #timeout ?~ 10) of
+    case finalise (defaultConfig <> cfgPart) of
         Left os -> do
-            putStrLn $
-                "Missing mandatory options: "
-             <> intercalate ", " os
-            exitFailure
+            -- Config could not be loaded, so we initialise default logging
+            -- configuration, because it is better than nothing.
+            withLogWarper mempty $ do
+                logCritical $ "Missing mandatory options: "+|listF os|+""
+                exitFailure
         Right cfg -> do
-            putTextLn "Config loaded!"
-            putTextLn $ "Timeout: " <> show (cfg ^. option #timeout)
-            putTextLn $ "Hostname: " <> show (cfg ^. sub #server . option #host)
-            putTextLn $ "Port: " <> show (cfg ^. sub #server . option #port)
+            withLogWarper (cfg ^. option #logging) $ do
+                logDebug "Config loaded"
+                logInfo $ "Timeout: "+|cfg ^. option #timeout|+""
+                logInfo $ "Hostname: "+|cfg ^. sub #server . option #host|+""
+                logInfo $ "Port: "+|cfg ^. sub #server . option #port|+""
   where
-    loadConfig :: IO ConfigPart
-    loadConfig = decodeFileEither configPath >>= \case
-        Left e        -> print e >> exitFailure
-        Right cfgPart -> pure cfgPart
+    loadConfig :: MonadIO m => m ConfigPart
+    loadConfig = liftIO $
+        decodeFileEither configPath >>= \case
+            Left e        -> print e >> exitFailure
+            Right cfgPart -> pure cfgPart

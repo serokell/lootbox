@@ -4,6 +4,7 @@ packages:
   - code/base
   - code/config
   - code/crypto
+  - code/log
   - code/network
   - code/prelude
 

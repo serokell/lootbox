@@ -10,7 +10,11 @@ packages:
   - universum-1.1.0
 
   - git: https://github.com/int-index/caps
-    commit: 858e76d8d92d683ff75f298ff39ca6b24daafaac
+    commit: 2f46fc6d5480bdef0a17f64359ad6eb29510dba4
+
+  # for caps
+  - git: https://github.com/mokus0/dependent-sum
+    commit: f8909cb323b4ffa63af6c4e7cb3a9745e6199080
 
   # for log-warper
   - o-clock-0.1.0
