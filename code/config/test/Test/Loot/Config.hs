@@ -3,8 +3,6 @@
 
 module Test.Loot.Config where
 
-import Universum
-
 import Data.Aeson (eitherDecode)
 
 import Loot.Config

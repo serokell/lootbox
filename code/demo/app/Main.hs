@@ -1,11 +1,8 @@
 {-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedLabels  #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
-
-import Universum
 
 import Data.Yaml (decodeFileEither)
 

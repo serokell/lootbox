@@ -6,8 +6,6 @@ module Loot.Demo.Config
        , ConfigPart
        ) where
 
-import Universum
-
 import Loot.Config ((:::), (::<), ConfigKind (Final, Partial), ConfigRec)
 
 

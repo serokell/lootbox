@@ -1,0 +1,18 @@
+# We import `definitions.yaml` here instead of `lib.yaml` because
+# the latter makes the package depend on `loot-prelude` and we cannot
+# depend on it, because, uhm, well, we are in `loot-prelude` right now.
+# Luckily, this package is so simple that there is really not much to
+# set here.
+<<: !include "../base/hpack/definitions.yaml"
+
+<<: *meta
+name: loot-prelude
+
+ghc-options: *ghc-options
+when: *when
+
+library:
+  <<: *lib-common
+  dependencies:
+    - base
+    - universum
