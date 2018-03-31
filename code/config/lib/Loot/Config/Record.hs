@@ -36,8 +36,6 @@ module Loot.Config.Record
        , sub
        ) where
 
-import Universum
-
 import Data.Validation (AccValidation (AccFailure, AccSuccess), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
 import Data.Vinyl.Lens (RecElem, rlens)

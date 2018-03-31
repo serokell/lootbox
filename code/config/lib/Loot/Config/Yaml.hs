@@ -9,8 +9,6 @@ module Loot.Config.Yaml
        ( configParser
        ) where
 
-import Universum
-
 import Data.Aeson (FromJSON (parseJSON))
 import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault, toAesonParser')
 import Data.Vinyl (Rec ((:&), RNil))

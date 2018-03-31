@@ -2,6 +2,7 @@ name: lootbox-snapshot
 resolver: lts-10.7
 
 packages:
+  - base-noprelude-4.10.1.0
   - log-warper-1.8.9
   - serialise-0.2.0.0
   - serokell-util-0.6.0

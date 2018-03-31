@@ -4,9 +4,9 @@ library:
   source-dirs: lib
 
   dependencies:
-    - base
-    - universum
+    - base-noprelude
 
+    - loot-base
     - loot-config
 
 executables:
@@ -15,11 +15,11 @@ executables:
     main: Main.hs
 
     dependencies:
+      - base-noprelude
+
       - loot-demo
 
-      - base
-      - universum
-
+      - loot-base
       - loot-config
       - yaml
 

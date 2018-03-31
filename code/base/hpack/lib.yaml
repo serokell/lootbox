@@ -14,7 +14,6 @@ default-extensions:
   - GeneralizedNewtypeDeriving
   - LambdaCase
   - NamedFieldPuns
-  - NoImplicitPrelude
   - OverloadedLabels
   - OverloadedStrings
   - RankNTypes
@@ -24,7 +23,7 @@ default-extensions:
   - TypeApplications
 
 dependencies:
-  - base >=4.7 && <5
+  - base-noprelude
   - universum
 
 
