@@ -6,8 +6,6 @@ library:
   <<: *lib-common
 
   dependencies:
-    - loot-base
-
     - aeson
     - aeson-better-errors
     - microlens

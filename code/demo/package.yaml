@@ -6,8 +6,8 @@ library:
   dependencies:
     - base-noprelude
 
-    - loot-base
     - loot-config
+    - loot-prelude
 
 executables:
   loot-demo:
@@ -18,8 +18,8 @@ executables:
       - base-noprelude
 
       - loot-demo
+      - loot-prelude
 
-      - loot-base
       - loot-config
       - yaml
 
