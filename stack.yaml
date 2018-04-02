@@ -5,6 +5,7 @@ packages:
   - code/config
   - code/network
   - code/prelude
+  - code/tools-common
 
   - code/demo
 

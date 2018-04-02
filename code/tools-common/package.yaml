@@ -1,0 +1,18 @@
+<<: !include "../base/hpack/lib.yaml"
+
+name: loot-tools-common
+
+library:
+  <<: *lib-common
+
+  dependencies:
+    - directory
+    
+executables:
+  ale-keychain:
+    main:        Main.hs
+    source-dirs: tools/keychain
+    <<:          *exec-common
+
+    dependencies:
+     - loot-tools-common
