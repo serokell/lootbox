@@ -1,0 +1,21 @@
+<<: !include "../base/hpack/lib.yaml"
+
+name: loot-crypto
+
+library:
+  <<: *lib-common
+
+  dependencies:
+  - bech32-haskell       == 0.1.*
+  - bytestring
+
+tests:
+  loot-base-test:
+    <<: *test-common
+
+    dependencies:
+      - tasty
+      - tasty-discover
+      - tasty-hunit
+
+      - loot-crypto
