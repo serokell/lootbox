@@ -48,6 +48,7 @@ import Control.Monad.Trans.Except (except)
 import Data.ByteString.Lazy (fromChunks, toChunks)
 import Data.Hashable (Hashable (hash, hashWithSalt))
 import Data.Word (Word16)
+import Fmt ((+||), (||+))
 import Network.Socket (HostName)
 import Network.Transport (Connection (close, send), ConnectionId,
                           EndPoint (closeEndPoint, connect, receive), EndPointAddress (..),
@@ -62,7 +63,7 @@ import System.Wlog (LoggerName, LoggerNameBox (..), WithLoggerIO, askLoggerName,
                     productionB, usingLoggerName)
 import UnliftIO.Async (async, wait, withAsync)
 
-import Fmt ((+||), (||+))
+import Loot.Network.TypeLevel (UniqSymbols, toStringList)
 
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BSL
@@ -120,13 +121,17 @@ data RawClientComponent = RawClientComponent
 -- This function returns a list containing /raw/ component contexts
 -- each of which should be converted to a typed one, passed
 -- to the respective component and used there for network communication.
-withClient :: (MonadMask m, WithLoggerIO m, MonadUnliftIO m)
-           => HostName       -- ^ Server host name
-           -> Word16         -- ^ Server port
-           -> [ComponentId]  -- ^ List of components to start
-           -> Int            -- ^ Timeout on gracefully stopping
-           -> (ClientContext -> m a) -> m a
-withClient host port cids timeout cont = do
+withClient ::
+    ( MonadMask m, WithLoggerIO m, MonadUnliftIO m
+    , UniqSymbols cIds)
+    => HostName       -- ^ Server host name
+    -> Word16         -- ^ Server port
+    -> Proxy cIds     -- ^ Type-level list of components to start
+    -> Int            -- ^ Timeout on gracefully stopping
+    -> (ClientContext -> m a) -> m a
+withClient host port pcids timeout cont = do
+    let cids = toStringList pcids
+
     -- Create a TCP endpoint.
     tr <- liftIO $ exceptIO show $ createTransport Unaddressable defaultTCPParameters
     ep <- liftIO $ exceptIO teText $ newEndPoint tr
@@ -284,14 +289,19 @@ data ServerContext = ServerContext
 -- This function returns a list containing /raw/ component contexts
 -- each of which should be converted to a typed one, passed
 -- to the respective component and used there for network communication.
-withServer :: (MonadMask m, WithLoggerIO m, MonadUnliftIO m)
-           => HostName       -- ^ Listen host name
-           -> Word16         -- ^ Listen port
-           -> [ComponentId]  -- ^ List of components to start
-           -> Int            -- ^ Timeout on gracefully stopping
-           -> (ServerContext -> m a)
-           -> m a
-withServer host port cids timeout cont = do
+withServer ::
+    ( MonadMask m, WithLoggerIO m, MonadUnliftIO m
+    , UniqSymbols cIds
+    )
+    => HostName       -- ^ Listen host name
+    -> Word16         -- ^ Listen port
+    -> Proxy cIds     -- ^ Type-level list of components to start
+    -> Int            -- ^ Timeout on gracefully stopping
+    -> (ServerContext -> m a)
+    -> m a
+withServer host port pcids timeout cont = do
+    let cids = toStringList pcids
+
     -- Create a TCP endpoint.
     tr <- liftIO $ exceptIO show $ createTransport listenAddr defaultTCPParameters
     ep <- liftIO $ exceptIO teText $ newEndPoint tr
