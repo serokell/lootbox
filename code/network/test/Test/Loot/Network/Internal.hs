@@ -1,10 +1,11 @@
-module Test.Components where
+module Test.Loot.Network.Internal where
 
 import Universum
 
-import Network.Components (ClientContext (..), ServerContext (..), clientRequest, serverReply,
-                           setupLogging, withClient, withServer)
+import Loot.Network.Internal
+
 import Test.HUnit (Test (..), runTestTT)
+
 import UnliftIO.Async (async)
 
 main = runTestTT $ TestCase $ setupLogging "test" $

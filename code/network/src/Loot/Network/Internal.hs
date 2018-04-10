@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+
 -- | Internals of networking subsystem.
 --
 -- The internals of networking are not typed, which means that we send and receive
@@ -13,7 +14,7 @@
 -- where @cid@ is the identifier of the component that sent the message.
 -- This pair is being serialised using 'serialise' because it seems to be
 -- the simplest way to reliably send a pair over our chosen transport.
-module Network.Components
+module Loot.Network.Internal
        ( ComponentId
 
        , RawClientComponent (..)
