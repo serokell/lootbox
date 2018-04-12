@@ -3,6 +3,7 @@ resolver: snapshot.yaml
 packages:
   - code/base
   - code/config
+  - code/crypto
   - code/network
   - code/prelude
 
@@ -12,3 +13,7 @@ ghc-options:
   "$locals": -Wall
              -Wincomplete-uni-patterns
              -Wincomplete-record-updates
+
+nix:
+  packages:
+    - icu

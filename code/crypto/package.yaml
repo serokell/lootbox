@@ -1,0 +1,29 @@
+<<: !include "../base/hpack/lib.yaml"
+
+name: loot-crypto
+
+library:
+  <<: *lib-common
+
+  dependencies:
+    - array
+    - bytestring
+    - cryptonite
+    - memory
+    - text-icu
+
+tests:
+  loot-crypto-test:
+    <<: *test-common
+
+    dependencies:
+      - loot-crypto
+
+      - hedgehog
+      - tasty
+      - tasty-discover
+      - tasty-hedgehog
+      - tasty-hunit
+
+      - base16-bytestring
+      - bytestring
