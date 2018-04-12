@@ -32,7 +32,7 @@ import qualified Data.ByteString as BS
 -- | Things that can go bad when turning entropy into words.
 data EncodingError
     = LengthOutOfBounds { actualLength :: Int }
-    | NotDivisibleBy32 { actualRemainder :: Int }
+    | NotDivisibleBy4 { actualRemainder :: Int }
   deriving Show
 
 instance Exception EncodingError
@@ -42,7 +42,7 @@ instance Exception EncodingError
 entropyToMnemonic :: HasCallStack => ByteString -> [Text]
 entropyToMnemonic ent = runIdentity $ do
     unless (4 <= entBytes && entBytes <= 8) $ bug (LengthOutOfBounds entBytes)
-    unless (remainder == 0) $ bug (NotDivisibleBy32 remainder)
+    unless (remainder == 0) $ bug (NotDivisibleBy4 remainder)
     pure $ map (words_en A.!) indices
   where
     -- | Number of bytes of entropy in the input.
@@ -104,8 +104,8 @@ bytesToIndices = go 0 zeroBits
        -> Word16     -- ^ Five zeros, n bits we already have, rest are zeros
        -> [Word8]
        -> [Word16]
-    go n _ [] = if n == 11 then error "!!!" else []
-    go n b (c : cs) =
+    go _ _ [] = []
+    go n c (b : bs) =
         let -- | This many bits we still need.
             needBits = 11 - n
             -- | This many we can take from the next byte.
@@ -116,14 +116,14 @@ bytesToIndices = go 0 zeroBits
             haveBits = n + takeBits
 
             -- | Add new bits to existing ones.
-            b' = b .|. (fromIntegral c `shiftR` dropBits `shiftL` (needBits - takeBits))
+            c' = c .|. (fromIntegral b `shiftR` dropBits `shiftL` (needBits - takeBits))
         in
             if haveBits == 11
             then
-                let newB = fromIntegral (c `clearL` takeBits) `shiftL` (3 + takeBits)
-                in b' : go dropBits newB cs
+                let newC = fromIntegral (b `clearL` takeBits) `shiftL` (3 + takeBits)
+                in c' : go dropBits newC bs
             else
-                go haveBits b' cs
+                go haveBits c' bs
 
 
 -- | Clear leftmost bits.
