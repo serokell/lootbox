@@ -9,11 +9,11 @@ packages:
 
   - code/demo
 
+nix:
+  shell-file: shell.nix
+
 ghc-options:
   "$locals": -Wall
              -Wincomplete-uni-patterns
              -Wincomplete-record-updates
 
-nix:
-  packages:
-    - icu
