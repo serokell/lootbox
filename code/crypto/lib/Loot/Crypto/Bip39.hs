@@ -50,13 +50,13 @@ entropyToMnemonic ent = runIdentity $ do
     entBytes = BS.length ent
 
     -- | Used to check that the number of bits was divisible by 32.
-    -- (Which is the same as checking the number of bytes is divisible by 4).
+    -- (Which is the same as checking the number of bytes is divisible by 4.)
     remainder :: Int
     remainder = entBytes `rem` 4  -- 'rem' is probably faster than 'mod'
 
     -- WARNING: What comes next relies on the fact that there cannot be
     -- more than 256 bits of input entropy (according to the specification).
-    -- So we skip all the claculations, simply take the first byte of the hash,
+    -- So we skip all the calculations, simply take the first byte of the hash,
     -- stick it to the end and then split the resulting byte string into groups
     -- of 11 bits discarding any extra bits that remain.
     -- As long as there are no more than 256 bits of entropy, we will need only
