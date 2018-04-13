@@ -12,6 +12,7 @@ module Loot.Crypto.Bip39
        , bytesToIndices
        ) where
 
+import Control.Exception (throw)
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (SHA256))
 import Crypto.KDF.PBKDF2 (Parameters (Parameters), fastPBKDF2_SHA512)
@@ -41,8 +42,9 @@ instance Exception EncodingError
 -- | Turn entropy (pure bytes) into a mnemonic.
 entropyToMnemonic :: HasCallStack => ByteString -> [Text]
 entropyToMnemonic ent = runIdentity $ do
-    unless (4 <= entBytes && entBytes <= 8) $ bug (LengthOutOfBounds entBytes)
-    unless (remainder == 0) $ bug (NotDivisibleBy4 remainder)
+    unless (4 <= entBytes && entBytes <= 8) $
+        throw (LengthOutOfBounds entBytes)
+    unless (remainder == 0) $ throw (NotDivisibleBy4 remainder)
     pure $ map (words_en A.!) indices
   where
     -- | Number of bytes of entropy in the input.
