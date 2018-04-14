@@ -35,11 +35,6 @@ _definitions:
     - &ghc-options
         - -Wall
 
-    - &when
-        - condition:   os(linux)
-          ghc-options: -optl-fuse-ld=gold
-          ld-options:  -fuse-ld=gold
-
 
   _utils:
     - &lib-common

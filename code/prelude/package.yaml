@@ -9,7 +9,6 @@
 name: loot-prelude
 
 ghc-options: *ghc-options
-when: *when
 
 library:
   <<: *lib-common
