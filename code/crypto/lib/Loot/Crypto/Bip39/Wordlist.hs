@@ -1,7 +1,11 @@
+{-# LANGUAGE NoImplicitPrelude #-}
+
 -- | Wordlists from BIP 39.
 module Loot.Crypto.Bip39.Wordlist
        ( words_en
        ) where
+
+import Universum
 
 import Data.Array (Array, listArray)
 

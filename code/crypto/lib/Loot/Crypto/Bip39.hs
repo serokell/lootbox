@@ -1,3 +1,5 @@
+{-# LANGUAGE NoImplicitPrelude #-}
+
 -- | BIP 39 compatible implementation of mnemonics for secret keys.
 module Loot.Crypto.Bip39
        (
@@ -11,6 +13,8 @@ module Loot.Crypto.Bip39
        -- * Internal helpers
        , bytesToIndices
        ) where
+
+import Universum
 
 import Control.Exception (throw)
 import Crypto.Hash (hashWith)

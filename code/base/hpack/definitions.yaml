@@ -29,8 +29,8 @@ _definitions:
         - TypeApplications
 
     - &dependencies
-        - base-noprelude
-        - loot-prelude
+        - base
+        - universum
 
     - &ghc-options
         - -Wall
