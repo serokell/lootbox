@@ -5,7 +5,23 @@ name: loot-network
 library:
   <<: *lib-common
 
-  dependencies: []
+  dependencies:
+    - async
+    - bytestring
+    - containers
+    - dependent-map
+    - dependent-sum
+    - lens
+    - mtl
+    - network
+    - serialise
+    - singletons
+    - stm
+    - random
+    - reflection
+    - tagged
+    - unordered-containers
+    - zeromq4-haskell
 
 tests:
   loot-base-test:

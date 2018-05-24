@@ -22,8 +22,10 @@ _definitions:
         - DeriveGeneric
         - FlexibleContexts
         - FlexibleInstances
+        - FunctionalDependencies
         - GeneralizedNewtypeDeriving
         - LambdaCase
+        - MultiParamTypeClasses
         - NamedFieldPuns
         - OverloadedLabels
         - OverloadedStrings
