@@ -1,16 +1,43 @@
 <<: !include "../base/hpack/lib.yaml"
 
-name: loot-network
+dependencies:
+- async
+- async-combinators
+- base >= 4.7 && < 5
+- bytestring
+- cryptonite
+- fmt
+- hashable
+- HUnit
+- log-warper
+- list-t
+- network
+- network-transport
+- network-transport-tcp
+- transformers
+- mtl
+- serialise
+- stm
+- stm-containers
+- tasty
+- tasty-hunit
+- universum
+- unliftio-core
+- unliftio
+- unordered-containers
 
 library:
-  <<: *lib-common
+  source-dirs: src
 
-  dependencies: []
+name: loot-network
 
 tests:
-  loot-base-test:
-    <<: *test-common
-
+  loot-network-test:
+    main:                Test.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
     dependencies:
-      - tasty
-      - tasty-discover
+    - loot-network

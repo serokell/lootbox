@@ -11,6 +11,12 @@ packages:
 
   - git: https://github.com/int-index/caps
     commit: 858e76d8d92d683ff75f298ff39ca6b24daafaac
+  # The version on Hackage is different from GitHub
+  - git: https://github.com/haskell-distributed/network-transport-tcp
+    commit: e1a51974a53561b85fdbe77c423688db7a22f69b
+  # async-combinators (not on hackage)
+  - git: https://github.com/serokell/async-combinators
+    commit: 8102987b5662722f89ff90589521c4a1141c12f2
 
   # for log-warper
   - o-clock-0.1.0
