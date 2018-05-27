@@ -51,8 +51,9 @@ and, in particular, some relevant patterns:
 * "Nasty freelancer" pattern with ids equal to hosts (tcp://something:dealerPort)
   for ROUTER (cli back) <-> ROUTER (serv front) connection. Implies that
   clients don't have ID.
-* "Pub/Sub Message Envelopes". Messages are two frames, first one is
-  key, second is data.
+* "Pub/Sub Message Envelopes". Messages are three+ frames, first one is
+  key, second is address, third+ is data.
+  http://zguide.zeromq.org/page:all#toc49
 * "Load balancing" on the server side.
   * Message type is represented with a Bytestring and represents listener's
     capability to handle this type of message.
@@ -91,6 +92,9 @@ Some other important things that will be well-documented in future:
 Server: broker (ROUTER front/ROUTER back/PUB publisher) + listener workers (DEALER)
 Client broker (ROUTER front/ROUTER back/SUB subscriber) + client workers (DEALER)
 
+
+Links to specs:
+https://rfc.zeromq.org/spec:7/MDP
 
 Tasklist
 ========
@@ -188,13 +192,14 @@ class NetworkingCli t m where
     -- type will make it possible to distinguish.
     updatePeers :: ClientEnv t -> Set (NodeId t) -> Set (NodeId t) -> m ()
     -- ^ First arguments -- peers to connect to, second -- to disconnect.
-    send :: ClientEnv t -> Maybe (NodeId t) -> Content -> m ()
+    send :: ClientEnv t -> Maybe (NodeId t) -> Content -> m (NodeId t)
     -- ^ Send single message to a particular peer if specified, or to
-    -- any, if not.
+    -- any, if not. Returns the node message was sent.
     broadcast :: ClientEnv t -> Content -> m ()
     -- ^ Send message to all the peers using the client socket.
-    receive :: ClientEnv t -> m ReceiveRes
-    -- ^ Receive a message (reply or subscription update).
+    receive :: ClientEnv t -> m (NodeId t, ReceiveRes)
+    -- ^ Receive a message. It is either a reply from a node we did
+    -- the last send to, or a subscription update.
 
 type ListenerId = ByteString
 

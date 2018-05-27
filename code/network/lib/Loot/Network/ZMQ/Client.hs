@@ -18,7 +18,7 @@ module Loot.Network.ZMQ.Client
     , cReceive
     ) where
 
-import Codec.Serialise (Serialise, deserialiseOrFail, serialise)
+import Codec.Serialise (Serialise, deserialise, deserialiseOrFail, serialise)
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BSL
@@ -112,6 +112,9 @@ runBroker = do
             atomically $ do
                 l <- Set.toList <$> readTVar ztPeers
                 pure $ l L.!! (i `mod` length l)
+    let resolvePeer :: MonadIO m => ByteString -> m (Maybe ZTNodeId)
+        resolvePeer nodeid = do
+            atomically $ find ((== nodeid) . ztNodeConnectionId) <$> readTVar ztPeers
     let ftb _ = Z.receiveMulti front >>= \case
             [_,"","modpeers",xs] -> case deserialiseOrFail (BSL.fromStrict xs) of
                 Right (peersUpdate :: PeersUpdateReq) -> do
@@ -137,10 +140,14 @@ runBroker = do
                         in foldl' (\prevMap sub -> Map.alter insertCid sub prevMap) s subs
                     pure newSubs
                 forM_ newSubs $ Z.subscribe ztCliSub
-            (_clientId:"":"send":xs) -> do
+            (clientId:"":"send":xs) -> do
                 (peer,msg) <- case xs of
                                 (peer:"":msg) -> pure (peer,msg)
-                                ("":msg)      -> (,msg) . ztNodeConnectionId <$> choosePeer
+                                ("":msg)      -> do
+                                    randPeer <-  ztNodeConnectionId <$> choosePeer
+                                    Z.sendMulti front $ NE.fromList
+                                        [clientId,"","sent",BSL.toStrict $ serialise randPeer]
+                                    pure $ (randPeer,msg)
                                 other -> error $ "ftb wrong 'send' request: " <> show other
                 Z.sendMulti back $ peer :| msg
             (_clientId:"":"broadcast":msg) -> do
@@ -151,11 +158,14 @@ runBroker = do
             -- TODO ignoring peerAddr is WEIRD. Should we send it with a message? Or
             -- remember inside the map? Why do we expect node to send us clientId?..
             -- TODO conversations!
-            (_peerAddr:"":clientId:"":msg) ->
-                Z.sendMulti front $ NE.fromList $ [clientId,"","resp"] ++ msg
+            (peerAddr:"":clientId:"":msg) ->
+                resolvePeer peerAddr >>= \case
+                    Nothing -> putText $ "client btf: couldn't resolve peer: " <> show peerAddr
+                    Just nodeId -> Z.sendMulti front $ NE.fromList $
+                        [clientId,"","resp",BSL.toStrict $ serialise nodeId] ++ msg
             other -> putText $ "Client btf: wrong format: " <> show other
         stf _ = Z.receiveMulti ztCliSub >>= \case
-            m@(k:_) -> do
+            m@(k:_:_) -> do
                 cids <- atomically $ fromMaybe [] . Map.lookup k <$> readTVar ztSubscriptions
                 forM_ cids $ \clientId -> Z.sendMulti front $ NE.fromList $ [clientId, ""] ++ m
                 when (null cids) $
@@ -199,20 +209,26 @@ updPeers (ZTClientEnv sock) toAdd toDel =
     liftIO $ Z.sendMulti sock $
     "modpeers" :| [BSL.toStrict $ serialise (PeersUpdateReq toAdd toDel)]
 
-cSend :: MonadIO m => ZTClientEnv -> Maybe ZTNodeId -> Content -> m ()
-cSend (ZTClientEnv sock) to msg =
-    liftIO $ Z.sendMulti sock $ NE.fromList $
+cSend :: MonadIO m => ZTClientEnv -> Maybe ZTNodeId -> Content -> m ZTNodeId
+cSend (ZTClientEnv sock) to msg = liftIO $ do
+    Z.sendMulti sock $ NE.fromList $
         ["", "send"] ++ maybeToList (ztNodeConnectionId <$> to) ++ ("":msg)
+    let recvPeer = Z.receiveMulti sock >>= \case
+            ["",sent,nodeId] -> pure (deserialise $ BSL.fromStrict nodeId)
+            o -> error $ "cSend: broker didn't reply with 'sent': " <> show o
+    maybe recvPeer pure to
 
 cBroadcast :: MonadIO m => ZTClientEnv -> Content -> m ()
 cBroadcast (ZTClientEnv sock) msg =
     liftIO $ Z.sendMulti sock $ NE.fromList $ ["", "broadcast"] ++ ("":msg)
 
-cReceive :: MonadIO m => ZTClientEnv -> m ReceiveRes
+cReceive :: MonadIO m => ZTClientEnv -> m (ZTNodeId, ReceiveRes)
 cReceive (ZTClientEnv sock) = liftIO $ Z.receiveMulti sock >>= \case
-    ("":"resp":msg) -> pure $ Response msg
-    ("":"upd":k:msg) -> pure $ Update k msg
+    ("":"resp":a:msg) -> pure $ (decodeNodeId a, Response msg)
+    ("":"upd":k:a:msg) -> pure $ (decodeNodeId a, Update k msg)
     other -> error $ "Dealer receive: message malformed: " <> show other
+  where
+    decodeNodeId = deserialise . BSL.fromStrict
 
 instance ( MonadReader r m
          , HasLens' r ZTGlobalEnv

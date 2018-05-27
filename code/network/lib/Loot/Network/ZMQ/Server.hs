@@ -15,10 +15,12 @@ module Loot.Network.ZMQ.Server
     , lPublish
     ) where
 
+import Codec.Serialise (serialise)
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, makeLenses, _Just)
 import Control.Monad.STM (retry)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 
@@ -53,7 +55,10 @@ makeLenses ''ZTListenerInfo
 
 -- | A context for the broker, essentially.
 data ZTNetServEnv = ZTNetServEnv
-    { ztServFront :: Z.Socket Z.Router
+    { ztOurNodeId :: ZTNodeId
+      -- ^ Our identifier, in case we need it to send someone
+      -- explicitly (e.g. when PUBlishing).
+    , ztServFront :: Z.Socket Z.Router
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
     , ztServBack  :: Z.Socket Z.Router
@@ -84,7 +89,7 @@ createNetServEnv (ZTGlobalEnv ctx) zid = liftIO $ do
 
     listenersVar <- newTVarIO mempty
 
-    pure (ZTNetServEnv front back pub listenersVar)
+    pure (ZTNetServEnv zid front back pub listenersVar)
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m) => m ()
 runBroker = do
@@ -113,7 +118,9 @@ runBroker = do
         btf _ = Z.receiveMulti back >>= \case
             listenerId:"":d -> case d of
                 "send":m  -> Z.sendMulti front $ NE.fromList m
-                "pub":m   -> Z.sendMulti ztServPub $ NE.fromList m
+                "pub":k:m   -> do
+                    let a = BSL.toStrict $ serialise ztOurNodeId
+                    Z.sendMulti ztServPub $ NE.fromList $ k:a:m
                 ["ready"] ->
                     atomically $ modifyTVar ztListeners $
                         at listenerId . _Just . ztlState .~ ZTLReady
