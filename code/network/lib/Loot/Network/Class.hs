@@ -5,11 +5,6 @@
 -- This is a module containing almost all the documentation on the
 -- networking for now.
 
--- inb4 all the documentation in this module is highly watery. I should
--- make it more concise...
-
--- Todo rename "proxy" into "broker" or "queue"?
-
 {- |
 
 Networking prototype. This module aims to provide a networking API and
@@ -63,13 +58,13 @@ and, in particular, some relevant patterns:
     capability to handle this type of message.
   * Each listener is DEALER connected to a server backend ROUTER.
   * Listener can receive, reply, publish. All communication is done through
-    the server proxy, so reply/publish difference is made by sending extra
-    flag to the proxy.
-  * When proxy receives a message from the frontend, it determines its message
+    the server broker, so reply/publish difference is made by sending extra
+    flag to the broker.
+  * When broker receives a message from the frontend, it determines its message
     type and sends to the active listener that supports this message type.
-  * Listeners can be in "busy" or "ready" state. Proxy sets listener's state
-    to "busy" when proxy sends it a new task. After finishing the task,
-    listener tells proxy it is "ready".
+  * Listeners can be in "busy" or "ready" state. Broker sets listener's state
+    to "busy" when broker sends it a new task. After finishing the task,
+    listener tells broker it is "ready".
 
   So now we don't spawn a thread per connection, instead we can do a
   nice load balancing: create more threads of this type if needed (on
@@ -82,19 +77,19 @@ TODO <Picture here>
 
 Some other important things that will be well-documented in future:
 1. Server binds to two ports: ROUTER and PUSH
-2. It runs "server proxy" in a main thread, which routes requests from
+2. It runs "server broker" in a main thread, which routes requests from
    frontend (ROUTER) to listeners (DEALER). In other direction, it propagates
    replies and publications from listeners to outer world.
 3. Client has ROUTER backend to talk to servers and PULL to receive updates.
-4. It also has proxy called "client proxy" which connects a number
-   of client threads (that want to talk to network) to the proxy
-   frontend (ROUTER). Proxy gets messages from the frontend (worker requests)
+4. It also has broker called "client broker" which connects a number
+   of client threads (that want to talk to network) to the broker
+   frontend (ROUTER). Broker gets messages from the frontend (worker requests)
    and propagates them to backend, which sends them to the network.
-   Proxy also gets messages from the PULL and propagates them to
+   Broker also gets messages from the PULL and propagates them to
    a worker that "subscribed" to this kind of update.
 
-Server: proxy (ROUTER front/ROUTER back/PUB publisher) + listener workers (DEALER)
-Client proxy (ROUTER front/ROUTER back/SUB subscriber) + client workers (DEALER)
+Server: broker (ROUTER front/ROUTER back/PUB publisher) + listener workers (DEALER)
+Client broker (ROUTER front/ROUTER back/SUB subscriber) + client workers (DEALER)
 
 
 Tasklist
@@ -125,8 +120,8 @@ Pro features:
   * TODO Limits
   * TODO Listeners supporting multiple message types. This is not hard
     todo, but is it really needed?
-  * TODO Heartbeating between proxy and workers (ZMQ's PPP), to handle
-    workers/proxy failures.
+  * TODO Heartbeating between broker and workers (ZMQ's PPP), to handle
+    workers/broker failures.
   * TODO Load balancing on client backend -- choosing peer to connect based
     on its ping/average response speed/etc.
 
@@ -182,7 +177,7 @@ class NetworkingCli t m where
     getPeers :: m (Set (NodeId t))
     -- ^ Returns the list of current peers connected.
 
-    data ClientEnv t
+    type ClientEnv t
     registerClient :: ByteString -> Subscriptions -> m (ClientEnv t)
     -- ^ Register client worker -- it is expected then then main is
     -- forked and child thread uses his environment. The first
@@ -196,7 +191,7 @@ class NetworkingCli t m where
     send :: ClientEnv t -> Maybe (NodeId t) -> Content -> m ()
     -- ^ Send single message to a particular peer if specified, or to
     -- any, if not.
-    broadcastCli :: ClientEnv t -> Content -> m ()
+    broadcast :: ClientEnv t -> Content -> m ()
     -- ^ Send message to all the peers using the client socket.
     receive :: ClientEnv t -> m ReceiveRes
     -- ^ Receive a message (reply or subscription update).
@@ -211,7 +206,7 @@ class NetworkingServ t m where
     -- client context was created.
     runServer :: m ()
 
-    data ListenerEnv t
+    type ListenerEnv t
     -- | Register a new listener with a given name and message type he
     -- is subscribed to. All listener ids must be distinct. Listeners
     -- with the same message type are considered the same.
