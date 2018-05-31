@@ -19,6 +19,7 @@ _definitions:
 
     - &default-extensions
         - ApplicativeDo
+        - BangPatterns
         - DeriveGeneric
         - FlexibleContexts
         - FlexibleInstances

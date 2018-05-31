@@ -20,6 +20,7 @@ library:
     - random
     - reflection
     - tagged
+    - time
     - unordered-containers
     - zeromq4-haskell
 

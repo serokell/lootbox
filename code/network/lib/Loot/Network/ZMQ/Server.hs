@@ -42,7 +42,10 @@ endpointBrokerServer = "inproc://broker-client"
 data ZTCliId = ZTCliId ByteString
 
 -- | Worker can be either busy or ready.
-data ZTListenerState = ZTLBusy | ZTLReady deriving (Eq,Show)
+data ZTListenerState
+    = ZTLBusy
+    | ZTLReady
+    deriving (Eq, Show)
 
 -- | Information about listener available to the broker.
 data ZTListenerInfo = ZTListenerInfo
@@ -98,7 +101,7 @@ runBroker = do
     let back = ztServBack
 
     let ftb _ = Z.receiveMulti front >>= \case
-            m@(_clientId:"":msgT:_msg) -> do
+            m@(_clientId:"":ccf:msgT:_msg) -> do
                 -- TODO we block until at least one listener that can process this
                 -- message is ready. This is highly inefficient as there may be
                 -- other messages with other types that we can already process.

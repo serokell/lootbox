@@ -51,6 +51,7 @@ and, in particular, some relevant patterns:
 * "Nasty freelancer" pattern with ids equal to hosts (tcp://something:dealerPort)
   for ROUTER (cli back) <-> ROUTER (serv front) connection. Implies that
   clients don't have ID.
+  https://rfc.zeromq.org/spec:10/FLP/
 * "Pub/Sub Message Envelopes". Messages are three+ frames, first one is
   key, second is address, third+ is data.
   http://zguide.zeromq.org/page:all#toc49
@@ -93,7 +94,7 @@ Server: broker (ROUTER front/ROUTER back/PUB publisher) + listener workers (DEAL
 Client broker (ROUTER front/ROUTER back/SUB subscriber) + client workers (DEALER)
 
 
-Links to specs:
+MDP Protocol (which we somewhat follow).
 https://rfc.zeromq.org/spec:7/MDP
 
 Tasklist
@@ -172,11 +173,11 @@ type Subscriptions = [ByteString]
 data ReceiveRes = Response Content | Update ByteString Content
 
 class NetworkingCli t m where
-    -- | Full-size identities -- ports/hosts. Something we can connect to.
     type NodeId t
-    -- | Runs client routine. This must be run in the same thread
-    -- client context was created.
+    -- ^ Full-size identities -- ports/hosts. Something we can connect to.
     runClient :: m ()
+    -- ^ Runs client routine. This must be run in the same thread
+    -- client context was created.
 
     getPeers :: m (Set (NodeId t))
     -- ^ Returns the list of current peers connected.
@@ -204,8 +205,6 @@ class NetworkingCli t m where
 type ListenerId = ByteString
 
 class NetworkingServ t m where
-    -- | Client identifiers. Usually temporary, must be communicated
-    -- by client.
     type CliId t
     -- | Runs server routine. This must be run in the same thread
     -- client context was created.
