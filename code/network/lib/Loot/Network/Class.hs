@@ -198,6 +198,7 @@ data BiTQueue r s = BiTQueue
       -- ^ Queue to send messages.
     }
 
+
 type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, Content))
 
 type ClientId = ByteString
