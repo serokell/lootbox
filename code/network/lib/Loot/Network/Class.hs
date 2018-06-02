@@ -213,6 +213,9 @@ class NetworkingCli t m where
     getPeers :: m (Set (NodeId t))
     -- ^ Returns the list of current peers connected.
 
+    updatePeers :: Set (NodeId t) -> Set (NodeId t) -> m ()
+    -- ^ First arguments -- peers to connect to, second -- to disconnect.
+
     registerClient :: ClientId -> [MsgType] -> [Subscription]-> m (ClientEnv t)
     -- ^ Register client worker -- it is expected then then main is
     -- forked and child thread uses his environment. The first
@@ -222,8 +225,6 @@ class NetworkingCli t m where
     -- functionality in a single client, but still -- 'receive' return
     -- type will make it possible to distinguish.
 
-    updatePeers :: ClientEnv t -> Set (NodeId t) -> Set (NodeId t) -> m ()
-    -- ^ First arguments -- peers to connect to, second -- to disconnect.
 
 -- | Things server sends -- either replies (to the requested node) or
 -- publishing content.

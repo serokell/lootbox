@@ -1,5 +1,4 @@
 {-# LANGUAGE RecordWildCards      #-}
-{-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- method naming is HORRIBLE, i hope to fix it later
@@ -19,6 +18,7 @@ module Loot.Network.ZMQ.Client
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
+import Control.Lens (lens)
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import qualified Data.List as L
@@ -90,8 +90,11 @@ data ZTNetCliEnv = ZTNetCliEnv
       -- from, like updating peers or resetting connection.
     }
 
---instance HasLens' r ZTNetCliEnv => HasLens RequestQueue r RequestQueue where
---    lensOf = lensOf . to ztRequestQueue
+instance HasLens ZTNetCliEnv r ZTNetCliEnv =>
+         HasLens RequestQueue r RequestQueue where
+    lensOf =
+        (lensOf @ZTNetCliEnv) .
+        (lens ztRequestQueue (\ztce rq2 -> ztce {ztRequestQueue = rq2}))
 
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
