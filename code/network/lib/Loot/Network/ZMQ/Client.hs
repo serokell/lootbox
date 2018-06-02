@@ -5,20 +5,22 @@
 -- method naming is HORRIBLE, i hope to fix it later
 -- | ZMQ Client implementation.
 
-module Loot.Network.ZMQ.Client
-    ( ZTNetCliEnv
-    , createNetCliEnv
-    , ZTClientEnv
-    , runBroker
-    , ztGetPeers
-    , updPeers
-    , regClient
-    , cSend
-    , cBroadcast
-    , cReceive
-    ) where
+module Loot.Network.ZMQ.Client where
+--    ( ZTNetCliEnv
+--    , createNetCliEnv
+--    , ZTClientEnv
+--    , runBroker
+--    , ztGetPeers
+--    , updPeers
+--    , regClient
+--    , cSend
+--    , cBroadcast
+--    , cReceive
+--    ) where
 
 import Codec.Serialise (Serialise, deserialise, deserialiseOrFail, serialise)
+import Control.Concurrent.STM.TQueue (TQueue)
+import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BSL
@@ -31,79 +33,100 @@ import System.Random (randomIO)
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
-import Loot.Network.Class (Content, NetworkingCli (..), ReceiveRes (..), Subscriptions)
-import Loot.Network.Utils (HasLens (..), HasLens')
+import Loot.Network.Class
+import Loot.Network.Utils (HasLens (..), HasLens', whileM)
+import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ZmqTcp, ztContext,
                                 ztNodeConnectionId, ztNodeIdRouter)
 
+----------------------------------------------------------------------------
+-- Internal requests
+----------------------------------------------------------------------------
 
--- | Address of the client broker's frontend (ROUTER), to which clients
--- are connected.
-endpointBrokerClient :: String
-endpointBrokerClient = "inproc://broker-client"
-
--- | Client environment state. Is to be used by the one thread only
--- (main client worker).
-data ZTNetCliEnv = ZTNetCliEnv
-    { ztCliFront      :: Z.Socket Z.Router
-      -- ^ Frontend which is talking to client workers. It accepts
-      -- requests and sends them to the outer network through backend.
-    , ztCliBack       :: Z.Socket Z.Router
-      -- ^ Backend which receives data from the network and
-      -- routes it to workers through frontend.
-    , ztCliSub        :: Z.Socket Z.Sub
-      -- ^ Subscriber socket which is listening to other nodes'
-      -- updates. It also sends data to clients through the frontend.
-    , ztPeers         :: TVar (Set (NodeId ZmqTcp))
-      -- ^ List of peers we are connected to. Is to be updated by the
-      -- main thread only (broker worker).
-    , ztSubscriptions :: TVar (Map ByteString [ByteString])
-      -- ^ Map from subscription key to clents' identifiers.
-    }
-
-createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set (NodeId ZmqTcp) -> m ZTNetCliEnv
-createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
-    front <- Z.socket ctx Z.Router
-    Z.bind front endpointBrokerClient
-
-    -- I guess it's alright to connect ROUTER instead of binding it.
-    -- https://stackoverflow.com/questions/16109139/zmq-when-to-use-zmq-bind-or-zmq-connect
-    back <- Z.socket ctx Z.Router
-    forM_ peers $ Z.connect back . ztNodeIdRouter
-
-    sub <- Z.socket ctx Z.Sub
-
-    peersVar <- newTVarIO peers
-
-    subsVar <- newTVarIO mempty
-
-    pure (ZTNetCliEnv front back sub peersVar subsVar)
-
-data PeersUpdateReq = PeersUpdateReq
-    { purAdd :: Set (NodeId ZmqTcp)
-    , purDel :: Set (NodeId ZmqTcp)
+data UpdatePeersReq = UpdatePeersReq
+    { purAdd :: Set ZTNodeId
+    , purDel :: Set ZTNodeId
     } deriving (Show, Generic)
 
-instance Serialise PeersUpdateReq
+data InternalRequest
+    = IRUpdatePeers UpdatePeersReq
+    | IRSubscribe ClientId [Subscription]
+    deriving (Show)
 
-applyPeersUpdate ::
-       Set (NodeId ZmqTcp)
-    -> PeersUpdateReq
-    -> (Set (NodeId ZmqTcp), Set (NodeId ZmqTcp))
-applyPeersUpdate peers (PeersUpdateReq {..}) = do
+
+instance Serialise UpdatePeersReq
+
+applyUpdatePeers ::
+       Set ZTNodeId -> UpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
+applyUpdatePeers peers (UpdatePeersReq {..}) = do
     let both = purDel `Set.intersection` purAdd
     let add' = (purAdd `Set.difference` both) `Set.difference` peers
     let del' = (purDel `Set.difference` both) `Set.intersection` peers
     (add',del')
 
+----------------------------------------------------------------------------
+-- Context
+----------------------------------------------------------------------------
 
-data ZTClientEnv = ZTClientEnv (Z.Socket Z.Dealer)
+type ZTClientEnv = BiTQueue (ZTNodeId, CliRecvMsg) (Maybe ZTNodeId, (MsgType, Content))
 
-runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m) => m ()
+-- | Client environment state. Is to be used by the one thread only
+-- (main client worker).
+data ZTNetCliEnv = ZTNetCliEnv
+    {
+      ztCliBack       :: Z.Socket Z.Router
+      -- ^ Backend which receives data from the network and routes it
+      -- to client workers.
+    , ztCliSub        :: Z.Socket Z.Sub
+      -- ^ Subscriber socket which is listening to other nodes'
+      -- updates. It also sends data to clients .
+
+    , ztPeers         :: TVar (Set ZTNodeId)
+      -- ^ List of peers we are connected to. Is to be updated by the
+      -- main thread only (broker worker).
+
+    , ztClients       :: TVar (Map ClientId ZTClientEnv)
+      -- ^ Channels binding broker to clients, map from client name to.
+    , ztSubscriptions :: TVar (Map Subscription [ClientId])
+      -- ^ Map from subscription key to clents' identifiers.
+    , ztMsgTypes      :: TVar (Map MsgType ClientId)
+      -- ^ Map from msg type key to clents' identifiers.
+
+    , ztRequestQueue  :: TQueue InternalRequest
+      -- ^ Queue to read (internal, administrative) client requests
+      -- from, like updating peers or resetting connection.
+    }
+
+createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
+createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
+    -- I guess it's alright to connect ROUTER instead of binding it.
+    -- https://stackoverflow.com/questions/16109139/zmq-when-to-use-zmq-bind-or-zmq-connect
+    ztCliBack <- Z.socket ctx Z.Router
+    forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
+
+    ztCliSub <- Z.socket ctx Z.Sub
+
+    ztClients <- newTVarIO mempty
+    ztPeers <- newTVarIO peers
+    ztSubscriptions <- newTVarIO mempty
+    ztMsgTypes <- newTVarIO mempty
+    ztRequestQueue <- TQ.newTQueueIO
+
+    pure ZTNetCliEnv {..}
+
+----------------------------------------------------------------------------
+-- Methods
+----------------------------------------------------------------------------
+
+data BrokerStmRes
+    = BSClient ClientId (Maybe ZTNodeId) (MsgType, Content)
+    | BSBack
+    | BSSub
+    | BSRequest InternalRequest deriving Show
+
+runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
     ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
-    let front = ztCliFront
-    let back = ztCliBack
     -- This function may do something creative (LRU! Lowest ping!),
     -- but instead (for now) it'll just choose a random peer.
     let choosePeer = do
@@ -115,69 +138,94 @@ runBroker = do
     let resolvePeer :: MonadIO m => ByteString -> m (Maybe ZTNodeId)
         resolvePeer nodeid = do
             atomically $ find ((== nodeid) . ztNodeConnectionId) <$> readTVar ztPeers
-    let ftb _ = Z.receiveMulti front >>= \case
-            [_,"","modpeers",xs] -> case deserialiseOrFail (BSL.fromStrict xs) of
-                Right (peersUpdate :: PeersUpdateReq) -> do
-                    (toConnect,toDisconnect) <- atomically $ do
-                        peers <- readTVar ztPeers
-                        let (toAdd,toDel) = applyPeersUpdate peers peersUpdate
-                        let peers' = (peers `Set.difference` toDel) `Set.union` toAdd
-                        writeTVar ztPeers $! peers'
-                        pure (toAdd,toDel)
-                    liftIO $ do
-                        forM_ toDisconnect $ Z.disconnect back . ztNodeIdRouter
-                        forM_ toConnect $ Z.connect back . ztNodeIdRouter
-                Left e                          ->
-                    error $ "Ftb client broker, modpeers parsing failed: " <> show e
-            (_:"":"subscribe":cid:subs) -> do
+
+    let sendToClient clientId (nId :: ZTNodeId, content :: CliRecvMsg) = do
+            res <- atomically $ do
+                cMap <- readTVar ztClients
+                let toWrite = bReceiveQ <$> Map.lookup clientId cMap
+                maybe pass (\tq -> TQ.writeTQueue tq (nId,content)) toWrite
+                pure $ isJust toWrite
+            unless res $ putText $ "sendToClient: cId doesn't exist: " <> show clientId
+
+        -- Processing internal requests.
+    let processReq = \case
+            IRUpdatePeers req -> do
+                (toConnect,toDisconnect) <- atomically $ do
+                    peers <- readTVar ztPeers
+                    let (toAdd,toDel) = applyUpdatePeers peers req
+                    let peers' = (peers `Set.difference` toDel) `Set.union` toAdd
+                    writeTVar ztPeers $! peers'
+                    pure (toAdd,toDel)
+                liftIO $ do
+                    forM_ toDisconnect $ Z.disconnect ztCliBack . ztNodeIdRouter
+                    forM_ toConnect $ Z.connect ztCliBack . ztNodeIdRouter
+            IRSubscribe clientId subs -> do
                 newSubs <- atomically $ do
                     currentSubs <-
                         Set.fromList . concat . Map.elems <$> readTVar ztSubscriptions
                     let newSubs = Set.fromList subs `Set.difference` currentSubs
                     modifyTVar ztSubscriptions $ \s ->
-                        let insertCid Nothing     = Just [cid]
-                            insertCid (Just cids) = Just $ L.nub $ cid : cids
-                        in foldl' (\prevMap sub -> Map.alter insertCid sub prevMap) s subs
+                        let insertClientId Nothing          = Just [clientId]
+                            insertClientId (Just clientIds) = Just $ L.nub $ clientId : clientIds
+                        in foldl' (\prevMap sub -> Map.alter insertClientId sub prevMap) s subs
                     pure newSubs
                 forM_ newSubs $ Z.subscribe ztCliSub
-            (clientId:"":"send":xs) -> do
-                (peer,msg) <- case xs of
-                                (peer:"":msg) -> pure (peer,msg)
-                                ("":msg)      -> do
-                                    randPeer <-  ztNodeConnectionId <$> choosePeer
-                                    Z.sendMulti front $ NE.fromList
-                                        [clientId,"","sent",BSL.toStrict $ serialise randPeer]
-                                    pure $ (randPeer,msg)
-                                other -> error $ "ftb wrong 'send' request: " <> show other
-                Z.sendMulti back $ peer :| msg
-            (_clientId:"":"broadcast":msg) -> do
-                (peers :: Set ZTNodeId) <- readTVarIO ztPeers
-                forM_ peers $ \zid -> Z.sendMulti back $ ztNodeConnectionId zid :| msg
-            other -> error $ "ftb wrong request format: " <> show other
-        btf _ = Z.receiveMulti back >>= \case
-            -- TODO ignoring peerAddr is WEIRD. Should we send it with a message? Or
-            -- remember inside the map? Why do we expect node to send us clientId?..
-            -- TODO conversations!
-            (peerAddr:"":clientId:"":msg) ->
-                resolvePeer peerAddr >>= \case
-                    Nothing -> putText $ "client btf: couldn't resolve peer: " <> show peerAddr
-                    Just nodeId -> Z.sendMulti front $ NE.fromList $
-                        [clientId,"","resp",BSL.toStrict $ serialise nodeId] ++ msg
-            other -> putText $ "Client btf: wrong format: " <> show other
-        stf _ = Z.receiveMulti ztCliSub >>= \case
-            m@(k:_:_) -> do
-                cids <- atomically $ fromMaybe [] . Map.lookup k <$> readTVar ztSubscriptions
-                forM_ cids $ \clientId -> Z.sendMulti front $ NE.fromList $ [clientId, ""] ++ m
-                when (null cids) $
-                    -- It shouldn't be alright, since it means that our clients
-                    -- records are broken (we're subscribed to something no client needs).
-                    error $ "stf: Nobody got the subscription message for key " <> show k
-            other -> putText $ "Client stf: wrong format: " <> show other
-    forever $ liftIO $
-        Z.poll (-1) [ Z.Sock front [Z.In] $ Just ftb
-                    , Z.Sock back [Z.In] $ Just btf
-                    , Z.Sock ztCliSub [Z.In] $ Just stf ]
 
+        -- Clients to backend.
+    let ctb clientId (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
+            nodeId <- ztNodeConnectionId <$> maybe choosePeer pure nodeIdM
+            Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", msgT] ++ msg
+
+        -- Backend (ROUTER) to clients.
+    let btc = \case
+            (addr:"":msgT:msg) -> resolvePeer addr >>= \case
+                Nothing -> putText $ "client btc: couldn't resolve peer: " <> show addr
+                Just nodeId -> do
+                    clientIdM <- atomically $ Map.lookup msgT <$> readTVar ztMsgTypes
+                    maybe (putText "client btc: couldn't find client with this message type")
+                          (\clientId -> sendToClient clientId (nodeId, Response msgT msg))
+                          clientIdM
+            other -> putText $ "client btf: wrong format: " <> show other
+
+        -- SUB to clients.
+    let stc = \case
+            m@(k:addr:content) -> resolvePeer addr >>= \case
+                Nothing -> putText $ "client stc: couldn't resolve peer: " <> show addr
+                Just nodeId -> do
+                    cids <- atomically $ fromMaybe [] . Map.lookup k <$> readTVar ztSubscriptions
+                    forM_ cids $ \clientId -> sendToClient clientId (nodeId, Update k content)
+                    when (null cids) $
+                        -- It shouldn't be alright, since it means that our clients
+                        -- records are broken (we're subscribed to something no client needs).
+                        error $ "stf: Nobody got the subscription message for key " <> show k
+            other -> putText $ "Client stc: wrong format: " <> show other
+    (backStm, backDestroy) <- socketWaitReadSTMLong ztCliBack
+    (subStm, subDestroy) <- socketWaitReadSTMLong ztCliSub
+    let action = liftIO $ do
+            res <- atomically $ do
+                cMap <- readTVar ztClients
+                let readReq = BSRequest <$> TQ.readTQueue ztRequestQueue
+                let readClient =
+                        map (\(cliId,biq) -> do (nodeIdM,content) <- TQ.readTQueue (bSendQ biq)
+                                                pure $ BSClient cliId nodeIdM content)
+                            (Map.toList cMap)
+                orElseMulti $ NE.fromList $ [ readReq
+                                            , BSBack <$ backStm
+                                            , BSSub <$ subStm ] ++ readClient
+            case res of
+                BSRequest r            -> processReq r
+                BSClient cId nIdM cont -> ctb cId nIdM cont
+                BSBack                 -> whileM (canReceive ztCliBack) $
+                                          Z.receiveMulti ztCliBack >>= btc
+                BSSub                  -> whileM (canReceive ztCliSub) $
+                                          Z.receiveMulti ztCliSub >>= stc
+    forever action `finally` (backDestroy >> subDestroy)
+
+----------------------------------------------------------------------------
+-- Methods
+----------------------------------------------------------------------------
+
+{-
 -- | Retrieve peers we're connected to.
 ztGetPeers ::
        (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m) => m (Set ZTNodeId)
@@ -207,7 +255,7 @@ updPeers ::
     -> m ()
 updPeers (ZTClientEnv sock) toAdd toDel =
     liftIO $ Z.sendMulti sock $
-    "modpeers" :| [BSL.toStrict $ serialise (PeersUpdateReq toAdd toDel)]
+    "modpeers" :| [BSL.toStrict $ serialise (UpdatePeersReq toAdd toDel)]
 
 cSend :: MonadIO m => ZTClientEnv -> Maybe ZTNodeId -> Content -> m ZTNodeId
 cSend (ZTClientEnv sock) to msg = liftIO $ do
@@ -239,13 +287,6 @@ instance ( MonadReader r m
 
     runClient = runBroker
     getPeers = ztGetPeers
-
-    type ClientEnv ZmqTcp = ZTClientEnv
-
-    registerClient = regClient
-
-    updatePeers = updPeers
-
-    send = cSend
-    broadcast = cBroadcast
-    receive = cReceive
+-}
+--    registerClient = regClient
+--    updatePeers = updPeers

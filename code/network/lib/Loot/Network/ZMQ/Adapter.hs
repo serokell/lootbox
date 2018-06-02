@@ -6,6 +6,8 @@
 module Loot.Network.ZMQ.Adapter
        ( orElseMulti
        , threadWaitReadSTMLong
+       , socketWaitReadSTMLong
+       , canReceive
        ) where
 
 import Control.Concurrent (forkIO, threadDelay)
@@ -28,7 +30,6 @@ orElseMulti :: NonEmpty (STM a) -> STM a
 orElseMulti (x :| [])     = x
 orElseMulti (x :| (y:xs)) = x `orElse` (orElseMulti $ y :| xs)
 
-
 -- | Produces stm action corresponding to the action "lock until it is
 -- possible to read from the socket". It doesn't guarantee that there
 -- is actually any data to read from it.
@@ -42,6 +43,13 @@ threadWaitReadSTMLong fd = do
                         if b then Sync.writeTVar m False else retry
     let killAction = Sync.killThread t
     return (waitAction, killAction)
+
+-- | 'threadWaitReadSTMLong' adapted for sockets.
+socketWaitReadSTMLong :: (MonadIO m) => Z.Socket t -> m (STM (), m ())
+socketWaitReadSTMLong s = liftIO $ do
+    fd <- Z.fileDescriptor s
+    (stm, destroy) <- threadWaitReadSTMLong fd
+    pure (stm, liftIO destroy)
 
 -- | Checks if data can be received from the socket. Use @whileM
 -- canReceive process@ pattern after the STM action on the needed

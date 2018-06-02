@@ -100,13 +100,21 @@ https://rfc.zeromq.org/spec:7/MDP
 Tasklist
 ========
 
+TODO Maybe it's better to declare msgType-oriented client/server
+mapping on both client and server? What if there are two different
+client threads capable of sending txs to the network? Do we want to
+support this?
+
+It's much simpler to define msgType-based broker->client routing and
+let clients define their own internal routing policy.
+
 Done:
   * Subscriptions
   * Client-worker by tag/type (Router on server back instead of Dealer)
   * Choose node when sending a message from client (Router, not Dealer)
 
 Basic features:
-  * TODO Conversations ...
+  * TODO Client-side message routing (msgType-based or latest-sent-based?).
   * TODO Load balancing on server backend. TODO Read "majordomo" pattern again.
   * TODO Heartbeating
   * TODO "Receive" timeouts (just poll before of receiveMulti)
@@ -134,12 +142,20 @@ Pro features:
 
 module Loot.Network.Class
     ( Content
-    , Subscriptions
-    , ReceiveRes(..)
+    , Subscription
+    , MsgType
+    , CliRecvMsg(..)
+    , ClientId
+    , BiTQueue(..)
+    , ClientEnv
     , NetworkingCli(..)
     , ListenerId
+    , ListenerEnv
+    , ServSendMsg(..)
     , NetworkingServ(..)
     ) where
+
+import Control.Concurrent.STM.TQueue (TQueue)
 
 ----------------------------------------------------------------------------
 -- Classes
@@ -166,11 +182,25 @@ module Loot.Network.Class
 type Content = [ByteString]
 
 -- | List of tags client is subscribed to.
-type Subscriptions = [ByteString]
+type Subscription = ByteString
+
+-- | Message type is characterized as a bytestring.
+type MsgType = ByteString
 
 -- | Either a response from some server or a subscription update (key
 -- and data).
-data ReceiveRes = Response Content | Update ByteString Content
+data CliRecvMsg = Response MsgType Content | Update Subscription Content
+
+data BiTQueue r s = BiTQueue
+    { bReceiveQ :: TQueue r
+      -- ^ Queue to receive messages.
+    , bSendQ    :: TQueue s
+      -- ^ Queue to send messages.
+    }
+
+type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, Content))
+
+type ClientId = ByteString
 
 class NetworkingCli t m where
     type NodeId t
@@ -182,25 +212,23 @@ class NetworkingCli t m where
     getPeers :: m (Set (NodeId t))
     -- ^ Returns the list of current peers connected.
 
-    type ClientEnv t
-    registerClient :: ByteString -> Subscriptions -> m (ClientEnv t)
+    registerClient :: ClientId -> [MsgType] -> [Subscription]-> m (ClientEnv t)
     -- ^ Register client worker -- it is expected then then main is
     -- forked and child thread uses his environment. The first
     -- argument is the (unique) client identity. The second argument
-    -- is list of tags client is "subscribed" for.  It's better not to
+    -- is list of tags client is "subscribed" for. It's better not to
     -- mix "send and receive" and "get update and process"
     -- functionality in a single client, but still -- 'receive' return
     -- type will make it possible to distinguish.
+
     updatePeers :: ClientEnv t -> Set (NodeId t) -> Set (NodeId t) -> m ()
     -- ^ First arguments -- peers to connect to, second -- to disconnect.
-    send :: ClientEnv t -> Maybe (NodeId t) -> Content -> m (NodeId t)
-    -- ^ Send single message to a particular peer if specified, or to
-    -- any, if not. Returns the node message was sent.
-    broadcast :: ClientEnv t -> Content -> m ()
-    -- ^ Send message to all the peers using the client socket.
-    receive :: ClientEnv t -> m (NodeId t, ReceiveRes)
-    -- ^ Receive a message. It is either a reply from a node we did
-    -- the last send to, or a subscription update.
+
+-- | Things server sends -- either replies (to the requested node) or
+-- publishing content.
+data ServSendMsg t = Reply (CliId t, Content) | Publish Content
+
+type ListenerEnv t = BiTQueue (CliId t, Content) (ServSendMsg t)
 
 type ListenerId = ByteString
 
@@ -210,22 +238,7 @@ class NetworkingServ t m where
     -- client context was created.
     runServer :: m ()
 
-    type ListenerEnv t
     -- | Register a new listener with a given name and message type he
     -- is subscribed to. All listener ids must be distinct. Listeners
     -- with the same message type are considered the same.
-    registerListener :: ListenerId -> ByteString -> m (ListenerEnv t)
-    -- | Receive. Block until listener gets any data. Second parameter
-    -- stands for "waiting for another conversation round". Since
-    -- listener can do several accepts and this communicate with peer
-    -- for some time, this marker is needed to indicate that worker is
-    -- busy. Set it to true if you've finished the previous
-    -- conversation.
-    --
-    -- Naming is questionable, but both cli and serv have "receive"s, so
-    -- wat do?
-    accept :: ListenerEnv t -> Bool -> m (CliId t, Content)
-    -- | Respond to a client's request.
-    respond :: ListenerEnv t -> CliId t -> Content -> m ()
-    -- | Publish some data -- key and content.
-    publish :: ListenerEnv t -> (ByteString,Content) -> m ()
+    registerListener :: ListenerId -> [MsgType] -> m (ListenerEnv t)

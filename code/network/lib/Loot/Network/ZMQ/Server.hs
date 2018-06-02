@@ -4,7 +4,9 @@
 
 -- | Server-side logic.
 
-module Loot.Network.ZMQ.Server
+module Loot.Network.ZMQ.Server () where
+{-
+
     ( ZTNetServEnv
     , createNetServEnv
     , ZTCliId
@@ -27,7 +29,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
-import Loot.Network.Class (Content, ListenerId, NetworkingServ (..))
+import Loot.Network.Class
 import Loot.Network.Utils (HasLens (..), HasLens')
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ZmqTcp, ztContext,
                                 ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
@@ -199,3 +201,5 @@ instance ( MonadReader r m
     accept = lAccept
     respond = lRespond
     publish = lPublish
+
+-}
