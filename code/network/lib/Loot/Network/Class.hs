@@ -181,15 +181,11 @@ import Control.Concurrent.STM.TQueue (TQueue)
 -- BSs are sent.
 type Content = [ByteString]
 
--- | List of tags client is subscribed to.
+-- | Bytestring describing the type of the subscription. The key.
 type Subscription = ByteString
 
 -- | Message type is characterized as a bytestring.
 type MsgType = ByteString
-
--- | Either a response from some server or a subscription update (key
--- and data).
-data CliRecvMsg = Response MsgType Content | Update Subscription Content
 
 data BiTQueue r s = BiTQueue
     { bReceiveQ :: TQueue r
@@ -198,6 +194,13 @@ data BiTQueue r s = BiTQueue
       -- ^ Queue to send messages.
     }
 
+----------------------------------------------------------------------------
+-- Client
+----------------------------------------------------------------------------
+
+-- | Either a response from some server or a subscription update (key
+-- and data).
+data CliRecvMsg = Response MsgType Content | Update Subscription Content
 
 type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, Content))
 
@@ -225,12 +228,15 @@ class NetworkingCli t m where
     -- functionality in a single client, but still -- 'receive' return
     -- type will make it possible to distinguish.
 
+----------------------------------------------------------------------------
+-- Server
+----------------------------------------------------------------------------
 
 -- | Things server sends -- either replies (to the requested node) or
 -- publishing content.
-data ServSendMsg t = Reply (CliId t, Content) | Publish Content
+data ServSendMsg cliId = Reply cliId MsgType Content | Publish Subscription Content
 
-type ListenerEnv t = BiTQueue (CliId t, Content) (ServSendMsg t)
+type ListenerEnv t = BiTQueue (CliId t, Content) (ServSendMsg (CliId t))
 
 type ListenerId = ByteString
 
@@ -241,6 +247,6 @@ class NetworkingServ t m where
     runServer :: m ()
 
     -- | Register a new listener with a given name and message type he
-    -- is subscribed to. All listener ids must be distinct. Listeners
-    -- with the same message type are considered the same.
+    -- is subscribed to. All listener ids must be distinct, as well as
+    -- message type sets.
     registerListener :: ListenerId -> [MsgType] -> m (ListenerEnv t)

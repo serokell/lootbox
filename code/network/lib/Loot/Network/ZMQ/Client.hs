@@ -8,7 +8,7 @@ module Loot.Network.ZMQ.Client
     ( ZTNetCliEnv
     , createNetCliEnv
     , ZTClientEnv
-    , RequestQueue
+    , CliRequestQueue
     , runBroker
     , getPeers
     , registerClient
@@ -55,46 +55,46 @@ applyUpdatePeers peers (UpdatePeersReq {..}) = do
     let del' = (purDel `Set.difference` both) `Set.intersection` peers
     (add',del')
 
+newtype CliRequestQueue = CliRequestQueue { unCliRequestQueue :: TQueue InternalRequest }
+
 ----------------------------------------------------------------------------
 -- Context
 ----------------------------------------------------------------------------
 
 type ZTClientEnv = BiTQueue (ZTNodeId, CliRecvMsg) (Maybe ZTNodeId, (MsgType, Content))
 
-newtype RequestQueue = RequestQueue { unRequestQueue :: TQueue InternalRequest }
-
 -- | Client environment state. Is to be used by the one thread only
 -- (main client worker).
 data ZTNetCliEnv = ZTNetCliEnv
     {
-      ztCliBack       :: Z.Socket Z.Router
+      ztCliBack         :: Z.Socket Z.Router
       -- ^ Backend which receives data from the network and routes it
       -- to client workers.
-    , ztCliSub        :: Z.Socket Z.Sub
+    , ztCliSub          :: Z.Socket Z.Sub
       -- ^ Subscriber socket which is listening to other nodes'
       -- updates. It also sends data to clients .
 
-    , ztPeers         :: TVar (Set ZTNodeId)
+    , ztPeers           :: TVar (Set ZTNodeId)
       -- ^ List of peers we are connected to. Is to be updated by the
       -- main thread only (broker worker).
 
-    , ztClients       :: TVar (Map ClientId ZTClientEnv)
+    , ztClients         :: TVar (Map ClientId ZTClientEnv)
       -- ^ Channels binding broker to clients, map from client name to.
-    , ztSubscriptions :: TVar (Map Subscription [ClientId])
+    , ztSubscriptions   :: TVar (Map Subscription [ClientId])
       -- ^ Map from subscription key to clents' identifiers.
-    , ztMsgTypes      :: TVar (Map MsgType ClientId)
+    , ztMsgTypes        :: TVar (Map MsgType ClientId)
       -- ^ Map from msg type key to clents' identifiers.
 
-    , ztRequestQueue  :: RequestQueue
+    , ztCliRequestQueue :: CliRequestQueue
       -- ^ Queue to read (internal, administrative) client requests
       -- from, like updating peers or resetting connection.
     }
 
 instance HasLens ZTNetCliEnv r ZTNetCliEnv =>
-         HasLens RequestQueue r RequestQueue where
+         HasLens CliRequestQueue r CliRequestQueue where
     lensOf =
         (lensOf @ZTNetCliEnv) .
-        (lens ztRequestQueue (\ztce rq2 -> ztce {ztRequestQueue = rq2}))
+        (lens ztCliRequestQueue (\ztce rq2 -> ztce {ztCliRequestQueue = rq2}))
 
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
@@ -109,7 +109,7 @@ createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
     ztPeers <- newTVarIO peers
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
-    ztRequestQueue <- RequestQueue <$> TQ.newTQueueIO
+    ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
 
     pure ZTNetCliEnv {..}
 
@@ -117,11 +117,11 @@ createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
 -- Methods
 ----------------------------------------------------------------------------
 
-data BrokerStmRes
-    = BSClient ClientId (Maybe ZTNodeId) (MsgType, Content)
-    | BSBack
-    | BSSub
-    | BSRequest InternalRequest
+data CliBrokerStmRes
+    = CBClient ClientId (Maybe ZTNodeId) (MsgType, Content)
+    | CBBack
+    | CBSub
+    | CBRequest InternalRequest
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
@@ -183,7 +183,7 @@ runBroker = do
                         in foldl' (\prevMap sub -> Map.alter insertClientId sub prevMap) s subs
                     pure newSubs
                 case res of
-                    Left e -> error $ "IRRegister: " <> e
+                    Left e -> error $ "Client IRRegister: " <> e
                     Right newSubs -> do
                         forM_ newSubs $ Z.subscribe ztCliSub
 
@@ -215,25 +215,26 @@ runBroker = do
                         -- records are broken (we're subscribed to something no client needs).
                         error $ "stf: Nobody got the subscription message for key " <> show k
             other -> putText $ "Client stc: wrong format: " <> show other
+
     (backStm, backDestroy) <- socketWaitReadSTMLong ztCliBack
     (subStm, subDestroy) <- socketWaitReadSTMLong ztCliSub
     let action = liftIO $ do
             res <- atomically $ do
                 cMap <- readTVar ztClients
-                let readReq = BSRequest <$> TQ.readTQueue (unRequestQueue ztRequestQueue)
+                let readReq = CBRequest <$> TQ.readTQueue (unCliRequestQueue ztCliRequestQueue)
                 let readClient =
                         map (\(cliId,biq) -> do (nodeIdM,content) <- TQ.readTQueue (bSendQ biq)
-                                                pure $ BSClient cliId nodeIdM content)
+                                                pure $ CBClient cliId nodeIdM content)
                             (Map.toList cMap)
                 orElseMulti $ NE.fromList $ [ readReq
-                                            , BSBack <$ backStm
-                                            , BSSub <$ subStm ] ++ readClient
+                                            , CBBack <$ backStm
+                                            , CBSub <$ subStm ] ++ readClient
             case res of
-                BSRequest r             -> processReq r
-                BSClient _cId nIdM cont -> ctb  nIdM cont
-                BSBack                  -> whileM (canReceive ztCliBack) $
+                CBRequest r             -> processReq r
+                CBClient _cId nIdM cont -> ctb  nIdM cont
+                CBBack                  -> whileM (canReceive ztCliBack) $
                                            Z.receiveMulti ztCliBack >>= btc
-                BSSub                   -> whileM (canReceive ztCliSub) $
+                CBSub                   -> whileM (canReceive ztCliSub) $
                                            Z.receiveMulti ztCliSub >>= stc
     forever action `finally` (backDestroy >> subDestroy)
 
@@ -248,21 +249,21 @@ getPeers = readTVarIO =<< (ztPeers <$> view (lensOf @ZTNetCliEnv))
 
 -- | Register a new client.
 registerClient ::
-       (MonadReader r m, HasLens' r RequestQueue, MonadIO m)
+       (MonadReader r m, HasLens' r CliRequestQueue, MonadIO m)
     => ClientId -> [MsgType] -> [Subscription] -> m ZTClientEnv
 registerClient clientId msgTs subs = do
-    requestQueue <- unRequestQueue <$> view (lensOf @RequestQueue)
+    cliRequestQueue <- unCliRequestQueue <$> view (lensOf @CliRequestQueue)
     liftIO $ do
         biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
-        atomically $ TQ.writeTQueue requestQueue $ IRRegister clientId msgTs subs biTQueue
+        atomically $ TQ.writeTQueue cliRequestQueue $ IRRegister clientId msgTs subs biTQueue
         pure biTQueue
 
 -- | Updates peers.
 updatePeers ::
-       (MonadReader r m, HasLens' r RequestQueue, MonadIO m)
+       (MonadReader r m, HasLens' r CliRequestQueue, MonadIO m)
     => Set ZTNodeId
     -> Set ZTNodeId
     -> m ()
 updatePeers toAdd toDel = do
-    requestQueue <- unRequestQueue <$> view (lensOf @RequestQueue)
-    atomically $ TQ.writeTQueue requestQueue $ IRUpdatePeers (UpdatePeersReq toAdd toDel)
+    cliRequestQueue <- unCliRequestQueue <$> view (lensOf @CliRequestQueue)
+    atomically $ TQ.writeTQueue cliRequestQueue $ IRUpdatePeers (UpdatePeersReq toAdd toDel)

@@ -16,10 +16,15 @@ module Loot.Network.ZMQ.Server () where
     , lRespond
     , lPublish
     ) where
+-}
+
 
 import Codec.Serialise (serialise)
+import Control.Concurrent.STM.TQueue (TQueue)
+import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, makeLenses, _Just)
+import Control.Monad.Except (runExceptT, throwError)
 import Control.Monad.STM (retry)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BSL
@@ -30,78 +35,77 @@ import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
 import Loot.Network.Class
-import Loot.Network.Utils (HasLens (..), HasLens')
+import Loot.Network.Utils (HasLens (..), HasLens', whileM)
+import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ZmqTcp, ztContext,
                                 ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
 
 
--- | Address of the server broker's backend (ROUTER), to which listeners
--- are connected.
-endpointBrokerServer :: String
-endpointBrokerServer = "inproc://broker-client"
+----------------------------------------------------------------------------
+-- Internal communication
+----------------------------------------------------------------------------
+
+data InternalRequest =
+    IRRegister ListenerId [MsgType] ZTListenerEnv
+
+newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue InternalRequest }
+
+----------------------------------------------------------------------------
+-- Methods
+----------------------------------------------------------------------------
 
 -- | Client id, as seen from the server side.
 data ZTCliId = ZTCliId ByteString
 
--- | Worker can be either busy or ready.
-data ZTListenerState
-    = ZTLBusy
-    | ZTLReady
-    deriving (Eq, Show)
+type ZTServSendMsg = ServSendMsg ZTCliId
 
--- | Information about listener available to the broker.
-data ZTListenerInfo = ZTListenerInfo
-    { _ztlId      :: ByteString
-    , _ztlMsgType :: ByteString
-    , _ztlState   :: ZTListenerState
-    }
-
-makeLenses ''ZTListenerInfo
+type ZTListenerEnv = BiTQueue (ZTCliId, Content) ZTServSendMsg
 
 -- | A context for the broker, essentially.
 data ZTNetServEnv = ZTNetServEnv
-    { ztOurNodeId :: ZTNodeId
+    { ztOurNodeId        :: ZTNodeId
       -- ^ Our identifier, in case we need it to send someone
       -- explicitly (e.g. when PUBlishing).
-    , ztServFront :: Z.Socket Z.Router
+    , ztServFront        :: Z.Socket Z.Router
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
-    , ztServBack  :: Z.Socket Z.Router
-      -- ^ Backend which distributes requests from the frontend
-      -- to the local listeners. It is connected to local listeners
-      -- via inproc. It's also router because we want to be choose
-      -- which listener to send request to. It also does the load
-      -- balancing. Hopefully.
-    , ztServPub   :: Z.Socket Z.Pub
+    , ztServPub          :: Z.Socket Z.Pub
       -- ^ Publishing socket. For publishing.
-    , ztListeners :: TVar (Map ByteString ZTListenerInfo)
-      -- Can be optimized even more by holding another map msgType -> info.
+
+    , ztListeners        :: TVar (Map ListenerId ZTListenerEnv)
       -- ^ Information about listeners, map from id to info. Id
       -- inside info must match the map key.
+    , ztMsgTypes         :: TVar (Map MsgType ListenerId)
+      -- ^ Income message types listeners work with.
+
+    , ztServRequestQueue :: ServRequestQueue
+      -- ^ Request queue for server.
     }
 
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
-createNetServEnv (ZTGlobalEnv ctx) zid = liftIO $ do
-    front <- Z.socket ctx Z.Router
-    Z.setIdentity (Z.restrict $ ztNodeConnectionId zid) front
-    Z.bind front (ztNodeIdRouter zid)
+createNetServEnv (ZTGlobalEnv ctx) ztOurNodeId = liftIO $ do
+    ztServFront <- Z.socket ctx Z.Router
+    Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
+    Z.bind ztServFront (ztNodeIdRouter ztOurNodeId)
 
-    back <- Z.socket ctx Z.Router
-    Z.bind back endpointBrokerServer
+    ztServPub <- Z.socket ctx Z.Pub
+    Z.bind ztServPub (ztNodeIdPub ztOurNodeId)
 
-    pub <- Z.socket ctx Z.Pub
-    Z.bind pub (ztNodeIdPub zid)
+    ztListeners <- newTVarIO mempty
+    ztMsgTypes <- newTVarIO mempty
+    ztServRequestQueue <- ServRequestQueue <$> TQ.newTQueueIO
 
-    listenersVar <- newTVarIO mempty
+    pure ZTNetServEnv {..}
 
-    pure (ZTNetServEnv zid front back pub listenersVar)
+data ServBrokerStmRes
+    = SBListener ListenerId ZTServSendMsg
+    | SBFront
+    | SBRequest InternalRequest
 
-runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m) => m ()
+runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
     ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
-    let front = ztServFront
-    let back = ztServBack
-
+{-
     let ftb _ = Z.receiveMulti front >>= \case
             m@(_clientId:"":ccf:msgT:_msg) -> do
                 -- TODO we block until at least one listener that can process this
@@ -135,11 +139,43 @@ runBroker = do
                     Z.sendMulti back $ NE.fromList [listenerId,"","registered"]
                 other         -> error $ "ZmqTcp server btf: unknown command: " <> show other
             other -> error $ "ZmqTcp server btf: malformed request: " <> show other
-    -- We could poll with timeout and then publish a heartbeat.
-    forever $ liftIO $
-        Z.poll (-1) [ Z.Sock front [Z.In] $ Just ftb
-                    , Z.Sock back [Z.In] $ Just btf ]
+-}
+    let processReq (IRRegister listenerId msgTypes lEnv) = do
+            res <- atomically $ runExceptT $ do
+                listenerRegistered <- Map.member listenerId <$> lift (readTVar ztListeners)
+                when listenerRegistered $ throwError "listener is already registered"
 
+                forM_ msgTypes $ \msgT -> do
+                    msgTClash <- Map.member msgT <$> lift (readTVar ztMsgTypes)
+                    when msgTClash $ throwError "msgT clashes"
+
+                lift $ modifyTVar ztListeners $ Map.insert listenerId lEnv
+                forM_ msgTypes $ \msgT ->
+                    lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
+
+            either (\e -> error $ "Server IRRegister: " <> show e) (const pass) res
+    let processReply = undefined
+    let frontToListener = undefined
+    (frontStm, frontDestroy) <- socketWaitReadSTMLong ztServFront
+    -- TODO add heartbeating trigger action (or worker?).
+    let action = liftIO $ do
+            res <- atomically $ do
+                lMap <- readTVar ztListeners
+                let readReq = SBRequest <$> TQ.readTQueue (unServRequestQueue ztServRequestQueue)
+                let readListener =
+                        map (\(listId,biq) -> do content <- TQ.readTQueue (bSendQ biq)
+                                                 pure $ SBListener listId content)
+                            (Map.toList lMap)
+                orElseMulti $ NE.fromList $ [ readReq
+                                            , SBFront <$ frontStm ] ++ readListener
+            case res of
+                SBRequest r         -> processReq r
+                SBListener _lId msg -> processReply msg
+                SBFront             -> whileM (canReceive ztServFront) $
+                                       Z.receiveMulti ztServFront >>= frontToListener
+    forever action `finally` frontDestroy
+
+{-
 -- | Listener's environment. What is _actually_ needed is REP with
 -- unrestricted send/receive pattern and one peer (bucket)
 -- connected. So DEALER suits well.
