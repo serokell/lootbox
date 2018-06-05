@@ -15,16 +15,19 @@ module Loot.Network.ZMQ.Client
     , updatePeers
     ) where
 
+import Control.Concurrent (threadDelay)
+import qualified Control.Concurrent.Async as A
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
-import Control.Lens (lens)
+import Control.Lens (at, lens, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import qualified Data.List as L
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Random (randomIO)
 
 import qualified System.ZMQ4 as Z
@@ -32,7 +35,72 @@ import qualified System.ZMQ4 as Z
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ztNodeConnectionId, ztNodeIdRouter)
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
+                                ztNodeConnectionId, ztNodeIdRouter)
+
+----------------------------------------------------------------------------
+-- Heartbeats
+----------------------------------------------------------------------------
+
+-- these should be configurable
+hbLivenessMax, hbIntervalMin, hbIntervalMax :: Integer
+hbLivenessMax = 5
+hbIntervalMin = 2000
+hbIntervalMax = 32000
+
+-- I use integer arithmetic here instead of UTCTime manipulation
+-- because it is all scoped (not an external API) and also (possibly)
+-- faster.
+
+data HBState = HBState
+    { _hbInterval :: Integer -- ^ Milliseconds.
+    , _hbLiveness :: Integer -- ^ Attempts before we reset the connection.
+    , _hbNextPoll :: Integer -- ^ POSIX milliseconds, when to decrease liveliness.
+    , _hbInactive :: Bool    -- ^ This flag makes node invisible to
+                             -- heartbeat worker, which is needed to
+                             -- deal with the fact that reconnects and
+                             -- disconnects take time.
+    }
+
+makeLenses ''HBState
+
+-- | Gets current time in POSIX ms.
+getCurrentTimeMS :: IO Integer
+getCurrentTimeMS = floor . (*1000) <$> getPOSIXTime
+
+updateHeartbeat :: TVar (Map ZTNodeId HBState) -> ZTNodeId -> IO ()
+updateHeartbeat states nodeId = do
+    let modAction Nothing    = error "updateHeartbeat: uninitalised"
+        modAction (Just hbs) = Just $ hbs & hbLiveness .~ hbLivenessMax
+    atomically $ modifyTVar states $ at nodeId %~ modAction
+
+heartbeatWorker :: ZTNetCliEnv -> IO ()
+heartbeatWorker cliEnv = do
+    -- Wait until everything is initialised (heuristically).
+    threadDelay 2000000
+    forever $ do
+        threadDelay 50000
+        curTime <- getCurrentTimeMS
+        let modMap :: Map ZTNodeId HBState -> (Set ZTNodeId, Map ZTNodeId HBState)
+            modMap hbMap =
+                let foo :: (ZTNodeId, HBState) -> (Bool, (ZTNodeId, HBState))
+                    foo x@(nodeId, hbs)
+                        | not (hbs ^. hbInactive) && hbs ^. hbNextPoll < curTime =
+                              if hbs ^. hbLiveness == 1
+                              then (True, (nodeId, hbs & hbInactive .~ True))
+                              else (False, (nodeId, hbs & hbLiveness -~ 1
+                                                        & hbNextPoll .~
+                                                          (curTime + hbs ^. hbInterval)))
+                        | otherwise = (False, x)
+                    mapped = map foo (Map.toList hbMap)
+                    toReconnect = map (fst . snd) $ filter fst mapped
+                in (Set.fromList toReconnect, Map.fromList $ map snd mapped)
+        atomically $ do
+            hbMap <- readTVar (ztHeartbeatInfo cliEnv)
+            let (toReconnect,hbMap') = modMap hbMap
+            writeTVar (ztHeartbeatInfo cliEnv) hbMap'
+            TQ.writeTQueue (unCliRequestQueue $ ztCliRequestQueue cliEnv) $
+                IRReconnect toReconnect
 
 ----------------------------------------------------------------------------
 -- Internal requests
@@ -46,6 +114,7 @@ data UpdatePeersReq = UpdatePeersReq
 data InternalRequest
     = IRUpdatePeers UpdatePeersReq
     | IRRegister ClientId (Set MsgType) (Set Subscription) ZTClientEnv
+    | IRReconnect (Set ZTNodeId)
 
 applyUpdatePeers ::
        Set ZTNodeId -> UpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
@@ -77,6 +146,9 @@ data ZTNetCliEnv = ZTNetCliEnv
     , ztPeers           :: TVar (Set ZTNodeId)
       -- ^ List of peers we are connected to. Is to be updated by the
       -- main thread only (broker worker).
+    , ztHeartbeatInfo   :: TVar (Map ZTNodeId HBState)
+      -- ^ Information about connection and current heartbeating
+      -- state.
 
     , ztClients         :: TVar (Map ClientId ZTClientEnv)
       -- ^ Channels binding broker to clients, map from client name to.
@@ -107,6 +179,7 @@ createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
 
     ztClients <- newTVarIO mempty
     ztPeers <- newTVarIO peers
+    ztHeartbeatInfo <- newTVarIO mempty -- initialise it later
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
@@ -125,7 +198,7 @@ data CliBrokerStmRes
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
-    ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
+    cEnv@ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
     -- This function may do something creative (LRU! Lowest ping!),
     -- but instead (for now) it'll just choose a random peer.
     let choosePeer = do
@@ -146,6 +219,8 @@ runBroker = do
                 maybe pass (\tq -> TQ.writeTQueue tq (nId,content)) toWrite
                 pure $ isJust toWrite
             unless res $ putText $ "sendToClient: cId doesn't exist: " <> show clientId
+
+    let onHeartbeat addr = liftIO $ updateHeartbeat ztHeartbeatInfo addr
 
         -- Processing internal requests.
     let processReq = \case
@@ -185,7 +260,7 @@ runBroker = do
                     Left e -> error $ "Client IRRegister: " <> e
                     Right newSubs -> do
                         forM_ newSubs $ Z.subscribe ztCliSub
-
+            IRReconnect _nIds -> undefined -- TODO
         -- Clients to backend.
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- ztNodeConnectionId <$> maybe choosePeer pure nodeIdM
@@ -196,6 +271,7 @@ runBroker = do
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
                 Nothing -> putText $ "client btc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
+                    onHeartbeat nodeId
                     clientIdM <- atomically $ Map.lookup msgT <$> readTVar ztMsgTypes
                     maybe (putText "client btc: couldn't find client with this message type")
                           (\clientId -> sendToClient clientId (nodeId, Response msgT msg))
@@ -205,18 +281,26 @@ runBroker = do
         -- SUB to clients.
     let subToClients = \case
             (k:addr:content) -> resolvePeer addr >>= \case
-                Nothing -> putText $ "client stc: couldn't resolve peer: " <> show addr
+                Nothing -> putText $ "Client stc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
-                    cids <-
-                        atomically $
-                        fromMaybe mempty . Map.lookup k <$> readTVar ztSubscriptions
-                    forM_ cids $ \clientId -> sendToClient clientId (nodeId, Update k content)
-                    when (null cids) $
-                        -- It shouldn't be alright, since it means that our clients
-                        -- records are broken (we're subscribed to something no client needs).
-                        error $ "stf: Nobody got the subscription message for key " <> show k
+                    onHeartbeat nodeId
+                    unless (k == heartbeatSubscription) $ do
+                        cids <-
+                            atomically $
+                            fromMaybe mempty . Map.lookup k <$>
+                            readTVar ztSubscriptions
+                        forM_ cids $ \clientId ->
+                          sendToClient clientId (nodeId, Update k content)
+                        when (null cids) $
+                            -- It shouldn't be alright, since it means
+                            -- that our clients records are broken
+                            -- (we're subscribed to something no
+                            -- client needs).
+                            error $ "Client stc: Nobody got the subscription " <>
+                                    "message for key " <> show k
             other -> putText $ "Client stc: wrong format: " <> show other
 
+    hbWorker <- liftIO $ A.async $ heartbeatWorker cEnv
     (_, backStmTry, backDestroy) <- socketWaitReadSTMLong ztCliBack
     (_, subStmTry, subDestroy) <- socketWaitReadSTMLong ztCliSub
     let action = liftIO $ do
@@ -242,7 +326,7 @@ runBroker = do
                                            Z.receiveMulti ztCliBack >>= backendToClients
                 CBSub                   -> whileM (canReceive ztCliSub) $
                                            Z.receiveMulti ztCliSub >>= subToClients
-    forever action `finally` (backDestroy >> subDestroy)
+    forever action `finally` (backDestroy >> subDestroy >> liftIO (A.cancel hbWorker))
 
 ----------------------------------------------------------------------------
 -- Methods

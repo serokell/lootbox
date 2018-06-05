@@ -12,6 +12,7 @@ module Loot.Network.ZMQ.Common
     , ztNodeIdRouter
     , ztNodeIdPub
     , ztNodeConnectionId
+    , heartbeatSubscription
     ) where
 
 
@@ -70,3 +71,7 @@ ztNodeConnectionId ZTNodeId{..} =
     in Z.rvalue $
        fromMaybe (error $ "ztNodeConnectionId: restriction check failed " <> fromString sid) $
        (Z.toRestricted (BS8.pack sid) :: Maybe (Z.Restricted (Z.N1, Z.N254) ByteString))
+
+-- | Key for heartbeat subscription.
+heartbeatSubscription :: ByteString
+heartbeatSubscription = "HRTBT"

@@ -12,6 +12,8 @@ module Loot.Network.ZMQ.Server
        , registerListener
        ) where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async as A
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
@@ -27,16 +29,17 @@ import qualified System.ZMQ4 as Z
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ztNodeConnectionId, ztNodeIdPub,
-                                ztNodeIdRouter)
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
+                                ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
 
 
 ----------------------------------------------------------------------------
 -- Internal communication
 ----------------------------------------------------------------------------
 
-data InternalRequest =
-    IRRegister ListenerId (Set MsgType) ZTListenerEnv
+data InternalRequest
+    = IRRegister ListenerId (Set MsgType) ZTListenerEnv
+    | IRHeartBeat
 
 newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue InternalRequest }
 
@@ -102,6 +105,10 @@ runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) 
 runBroker = do
     ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
 
+    let publish k v =
+            Z.sendMulti ztServPub $
+            NE.fromList $ [k,ztNodeConnectionId ztOurNodeId] ++ v
+
     let processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
                 listenerRegistered <- Map.member listenerId <$> lift (readTVar ztListeners)
@@ -116,14 +123,13 @@ runBroker = do
                     lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
 
             either (\e -> error $ "Server IRRegister: " <> e) (const pass) res
+        processReq IRHeartBeat = publish heartbeatSubscription []
 
     let processMsg = \case
             Reply cId msgT msg ->
                 Z.sendMulti ztServFront $
                 NE.fromList $ [unZtCliId cId,"",msgT] ++ msg
-            Publish k v ->
-                Z.sendMulti ztServPub $
-                NE.fromList $ [k,ztNodeConnectionId ztOurNodeId] ++ v
+            Publish k v -> publish k v
 
     let frontToListener = \case
             (cId:"":msgT:msg) -> do
@@ -135,6 +141,11 @@ runBroker = do
                   Just biQ ->
                       atomically $ TQ.writeTQueue (bReceiveQ biQ) (ZTCliId cId, msgT, msg)
             _ -> putText "frontToListener: wrong format"
+
+    hbWorker <- liftIO $ A.async $ forever $ do
+        let heartbeatInterval = 300000 -- 300 ms
+        threadDelay heartbeatInterval
+        atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
     (_, frontStmTry, frontDestroy) <- socketWaitReadSTMLong ztServFront
     -- TODO add heartbeating trigger worker sending new type SBRequest.
@@ -158,7 +169,7 @@ runBroker = do
                 SBListener _lId msg -> processMsg msg
                 SBFront             -> whileM (canReceive ztServFront) $
                                        Z.receiveMulti ztServFront >>= frontToListener
-    forever action `finally` frontDestroy
+    forever action `finally` (frontDestroy >> liftIO (A.cancel hbWorker))
 
 registerListener ::
        (MonadReader r m, HasLens' r ServRequestQueue, MonadIO m)

@@ -21,7 +21,6 @@ import Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue, writeTQue
 import Control.Monad.STM (STM, orElse, retry)
 import Data.List.NonEmpty as NE
 import qualified GHC.Conc.IO as G
-import qualified GHC.Conc.Sync as Sync
 import System.Posix.Types (Fd)
 import qualified System.ZMQ4 as Z
 
