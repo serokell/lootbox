@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -9,6 +10,7 @@ import qualified Loot.Network.Class as C
 import Loot.Network.Utils (HasLens')
 import qualified Loot.Network.ZMQ.Client as ZC
 import Loot.Network.ZMQ.Common (ZTGlobalEnv, ZTNodeId, ZmqTcp)
+import qualified Loot.Network.ZMQ.Server as ZS
 
 instance ( MonadReader r m
          , HasLens' r ZTGlobalEnv
@@ -22,3 +24,14 @@ instance ( MonadReader r m
     getPeers = ZC.getPeers
     updatePeers = ZC.updatePeers
     registerClient = ZC.registerClient
+
+instance ( MonadReader r m
+         , HasLens' r ZTGlobalEnv
+         , HasLens' r ZS.ZTNetServEnv
+         , MonadIO m
+         , MonadMask m) => C.NetworkingServ ZmqTcp m where
+
+    type CliId ZmqTcp = ZS.ZTCliId
+
+    runServer = ZS.runBroker
+    registerListener = ZS.registerListener

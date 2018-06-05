@@ -219,7 +219,7 @@ class NetworkingCli t m where
     updatePeers :: Set (NodeId t) -> Set (NodeId t) -> m ()
     -- ^ First arguments -- peers to connect to, second -- to disconnect.
 
-    registerClient :: ClientId -> [MsgType] -> [Subscription]-> m (ClientEnv t)
+    registerClient :: ClientId -> Set MsgType -> Set Subscription -> m (ClientEnv t)
     -- ^ Register client worker -- it is expected then then main is
     -- forked and child thread uses his environment. The first
     -- argument is the (unique) client identity. The second argument
@@ -249,4 +249,4 @@ class NetworkingServ t m where
     -- | Register a new listener with a given name and message type he
     -- is subscribed to. All listener ids must be distinct, as well as
     -- message type sets.
-    registerListener :: ListenerId -> [MsgType] -> m (ListenerEnv t)
+    registerListener :: ListenerId -> Set MsgType -> m (ListenerEnv t)

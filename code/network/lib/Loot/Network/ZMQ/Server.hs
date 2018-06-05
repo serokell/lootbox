@@ -4,41 +4,31 @@
 
 -- | Server-side logic.
 
-module Loot.Network.ZMQ.Server () where
-{-
+module Loot.Network.ZMQ.Server
+       ( ZTCliId(..)
+       , ZTNetServEnv
+       , createNetServEnv
+       , runBroker
+       , registerListener
+       ) where
 
-    ( ZTNetServEnv
-    , createNetServEnv
-    , ZTCliId
-    , ZTListenerEnv
-    , regListener
-    , lAccept
-    , lRespond
-    , lPublish
-    ) where
--}
-
-
-import Codec.Serialise (serialise)
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
-import Control.Lens (at, makeLenses, _Just)
+import Control.Lens (lens)
 import Control.Monad.Except (runExceptT, throwError)
-import Control.Monad.STM (retry)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
-import Loot.Network.Class
+import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ZmqTcp, ztContext,
-                                ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ztNodeConnectionId, ztNodeIdPub,
+                                ztNodeIdRouter)
 
 
 ----------------------------------------------------------------------------
@@ -46,7 +36,7 @@ import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), ZmqTcp, ztConte
 ----------------------------------------------------------------------------
 
 data InternalRequest =
-    IRRegister ListenerId [MsgType] ZTListenerEnv
+    IRRegister ListenerId (Set MsgType) ZTListenerEnv
 
 newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue InternalRequest }
 
@@ -81,6 +71,12 @@ data ZTNetServEnv = ZTNetServEnv
     , ztServRequestQueue :: ServRequestQueue
       -- ^ Request queue for server.
     }
+
+instance HasLens ZTNetServEnv r ZTNetServEnv =>
+         HasLens ServRequestQueue r ServRequestQueue where
+    lensOf =
+        (lensOf @ZTNetServEnv) .
+        (lens ztServRequestQueue (\ztce rq2 -> ztce {ztServRequestQueue = rq2}))
 
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
 createNetServEnv (ZTGlobalEnv ctx) ztOurNodeId = liftIO $ do
@@ -159,67 +155,13 @@ runBroker = do
                                        Z.receiveMulti ztServFront >>= frontToListener
     forever action `finally` frontDestroy
 
-{-
--- | Listener's environment. What is _actually_ needed is REP with
--- unrestricted send/receive pattern and one peer (bucket)
--- connected. So DEALER suits well.
-data ZTListenerEnv = ZTListenerEnv { ztListSock :: Z.Socket Z.Dealer }
-
-regListener ::
-       (MonadReader r m, HasLens' r ZTGlobalEnv, MonadIO m)
-    => ListenerId -> ByteString -> m ZTListenerEnv
-regListener lName msgType = do
-    ctx <- view $ lensOf @ZTGlobalEnv . ztContext
+registerListener ::
+       (MonadReader r m, HasLens' r ServRequestQueue, MonadIO m)
+    => ListenerId -> Set MsgType -> m ZTListenerEnv
+registerListener lName msgTypes = do
+    servRequestQueue <- unServRequestQueue <$> view (lensOf @ServRequestQueue)
     liftIO $ do
-        lSocket <- Z.socket ctx Z.Dealer
-        let lName' = fromMaybe (error $ "regList: lname is malformed: " <> show lName) $
-                     Z.toRestricted lName
-        Z.setIdentity lName' lSocket
-        Z.connect lSocket endpointBrokerServer
+        biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
 
-        Z.sendMulti lSocket $ NE.fromList $ ["","register",msgType]
-        Z.receiveMulti lSocket >>= \case
-            ["","registered"] -> pass
-            other -> error $ "registerClient: malformed reply from broker: " <> show other
-
-        pure $ ZTListenerEnv lSocket
-
--- | Accept on a listener side
-lAccept :: MonadIO m => ZTListenerEnv -> Bool -> m (ZTCliId, Content)
-lAccept (ZTListenerEnv {..}) marker = liftIO $ do
-    when marker $ Z.sendMulti ztListSock $ NE.fromList $ ["", "ready"]
-    Z.receiveMulti ztListSock >>= \case
-        "":clientId:"":msg -> pure (ZTCliId clientId, msg)
-        other -> error $ "onRequest: unknown format: " <> show other
-
-lRespond :: MonadIO m => ZTListenerEnv -> ZTCliId -> Content -> m ()
-lRespond (ZTListenerEnv {..}) (ZTCliId clientId) msg =
-    liftIO $ Z.sendMulti ztListSock $ NE.fromList $
-    ["", "send", clientId, ""] ++ msg
-
-lPublish :: MonadIO m => ZTListenerEnv -> (ByteString,Content) -> m ()
-lPublish (ZTListenerEnv {..}) (k,content) =
-    liftIO $ Z.sendMulti ztListSock $ NE.fromList $
-    ["", "pub", k] ++ content
-
--- This class should be moved somewhere else or
--- disappear. Constrainted methods allow us to provide instance for
--- any class -- abstracted, transformer, etc. They also allow us to
--- create caps. So Server.hs should provide methods only, not instances.
-instance ( MonadReader r m
-         , HasLens' r ZTGlobalEnv
-         , HasLens' r ZTNetServEnv
-         , MonadIO m) => NetworkingServ ZmqTcp m where
-
-    type CliId ZmqTcp = ZTCliId
-
-    runServer = runBroker
-
-    type ListenerEnv ZmqTcp = ZTListenerEnv
-
-    registerListener = regListener
-    accept = lAccept
-    respond = lRespond
-    publish = lPublish
-
--}
+        atomically $ TQ.writeTQueue servRequestQueue $ IRRegister lName msgTypes biTQueue
+        pure biTQueue

@@ -45,7 +45,7 @@ data UpdatePeersReq = UpdatePeersReq
 
 data InternalRequest
     = IRUpdatePeers UpdatePeersReq
-    | IRRegister ClientId [MsgType] [Subscription] ZTClientEnv
+    | IRRegister ClientId (Set MsgType) (Set Subscription) ZTClientEnv
 
 applyUpdatePeers ::
        Set ZTNodeId -> UpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
@@ -176,7 +176,7 @@ runBroker = do
                     -- subscriptions
                     currentSubs <-
                         Set.fromList . concat . Map.elems <$> lift (readTVar ztSubscriptions)
-                    let newSubs = Set.fromList subs `Set.difference` currentSubs
+                    let newSubs = subs `Set.difference` currentSubs
                     lift $ modifyTVar ztSubscriptions $ \s ->
                         let insertClientId Nothing          = Just [clientId]
                             insertClientId (Just clientIds) = Just $ L.nub $ clientId : clientIds
@@ -250,7 +250,7 @@ getPeers = readTVarIO =<< (ztPeers <$> view (lensOf @ZTNetCliEnv))
 -- | Register a new client.
 registerClient ::
        (MonadReader r m, HasLens' r CliRequestQueue, MonadIO m)
-    => ClientId -> [MsgType] -> [Subscription] -> m ZTClientEnv
+    => ClientId -> Set MsgType -> Set Subscription -> m ZTClientEnv
 registerClient clientId msgTs subs = do
     cliRequestQueue <- unCliRequestQueue <$> view (lensOf @CliRequestQueue)
     liftIO $ do
