@@ -55,11 +55,11 @@ newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue Inter
 ----------------------------------------------------------------------------
 
 -- | Client id, as seen from the server side.
-data ZTCliId = ZTCliId ByteString
+data ZTCliId = ZTCliId { unZtCliId :: ByteString }
 
 type ZTServSendMsg = ServSendMsg ZTCliId
 
-type ZTListenerEnv = BiTQueue (ZTCliId, Content) ZTServSendMsg
+type ZTListenerEnv = BiTQueue (ZTCliId, MsgType, Content) ZTServSendMsg
 
 -- | A context for the broker, essentially.
 data ZTNetServEnv = ZTNetServEnv
@@ -105,41 +105,7 @@ data ServBrokerStmRes
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
     ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
-{-
-    let ftb _ = Z.receiveMulti front >>= \case
-            m@(_clientId:"":ccf:msgT:_msg) -> do
-                -- TODO we block until at least one listener that can process this
-                -- message is ready. This is highly inefficient as there may be
-                -- other messages with other types that we can already process.
-                -- Current implementation is just a scratch.
-                (ztli :: ZTListenerInfo) <- atomically $ do
-                    listeners <- readTVar ztListeners
-                    let res = find (\l -> l ^. ztlMsgType == msgT &&
-                                          l ^. ztlState == ZTLReady)
-                                   (Map.elems listeners)
-                    let onSuccess ztli = do
-                            modifyTVar ztListeners $
-                                at (ztli ^. ztlId) . _Just . ztlState .~ ZTLBusy
-                            pure ztli
-                    maybe retry onSuccess res
-                Z.sendMulti back $ NE.fromList $ [ztli ^. ztlId, ""] ++ m
-            o -> putText $ "ZmqTcp server ftb: bad format, skipping: " <> show o
-        btf _ = Z.receiveMulti back >>= \case
-            listenerId:"":d -> case d of
-                "send":m  -> Z.sendMulti front $ NE.fromList m
-                "pub":k:m   -> do
-                    let a = BSL.toStrict $ serialise ztOurNodeId
-                    Z.sendMulti ztServPub $ NE.fromList $ k:a:m
-                ["ready"] ->
-                    atomically $ modifyTVar ztListeners $
-                        at listenerId . _Just . ztlState .~ ZTLReady
-                ["register",msgType] -> do
-                    atomically $ modifyTVar ztListeners $
-                        at listenerId .~ Just (ZTListenerInfo listenerId msgType ZTLBusy)
-                    Z.sendMulti back $ NE.fromList [listenerId,"","registered"]
-                other         -> error $ "ZmqTcp server btf: unknown command: " <> show other
-            other -> error $ "ZmqTcp server btf: malformed request: " <> show other
--}
+
     let processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
                 listenerRegistered <- Map.member listenerId <$> lift (readTVar ztListeners)
@@ -153,9 +119,27 @@ runBroker = do
                 forM_ msgTypes $ \msgT ->
                     lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
 
-            either (\e -> error $ "Server IRRegister: " <> show e) (const pass) res
-    let processReply = undefined
-    let frontToListener = undefined
+            either (\e -> error $ "Server IRRegister: " <> e) (const pass) res
+
+    let processMsg = \case
+            Reply cId msgT msg ->
+                Z.sendMulti ztServFront $
+                NE.fromList $ [unZtCliId cId,"",msgT] ++ msg
+            Publish k v ->
+                Z.sendMulti ztServPub $
+                NE.fromList $ [k,ztNodeConnectionId ztOurNodeId] ++ v
+
+    let frontToListener = \case
+            (cId:"":msgT:msg) -> do
+                ztEnv <- atomically $ runMaybeT $ do
+                    lId <- MaybeT $ Map.lookup msgT <$> readTVar ztMsgTypes
+                    MaybeT $ Map.lookup lId <$> readTVar ztListeners
+                case ztEnv of
+                  Nothing  -> putText "frontToListener: can't resolve msgT"
+                  Just biQ ->
+                      atomically $ TQ.writeTQueue (bReceiveQ biQ) (ZTCliId cId, msgT, msg)
+            _ -> putText "frontToListener: wrong format"
+
     (frontStm, frontDestroy) <- socketWaitReadSTMLong ztServFront
     -- TODO add heartbeating trigger action (or worker?).
     let action = liftIO $ do
@@ -170,7 +154,7 @@ runBroker = do
                                             , SBFront <$ frontStm ] ++ readListener
             case res of
                 SBRequest r         -> processReq r
-                SBListener _lId msg -> processReply msg
+                SBListener _lId msg -> processMsg msg
                 SBFront             -> whileM (canReceive ztServFront) $
                                        Z.receiveMulti ztServFront >>= frontToListener
     forever action `finally` frontDestroy

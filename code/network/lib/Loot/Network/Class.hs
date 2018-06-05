@@ -236,7 +236,7 @@ class NetworkingCli t m where
 -- publishing content.
 data ServSendMsg cliId = Reply cliId MsgType Content | Publish Subscription Content
 
-type ListenerEnv t = BiTQueue (CliId t, Content) (ServSendMsg (CliId t))
+type ListenerEnv t = BiTQueue (CliId t, MsgType, Content) (ServSendMsg (CliId t))
 
 type ListenerId = ByteString
 
