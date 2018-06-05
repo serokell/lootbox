@@ -155,7 +155,7 @@ data BiTQueue r s = BiTQueue
 
 -- | Either a response from some server or a subscription update (key
 -- and data).
-data CliRecvMsg = Response MsgType Content | Update Subscription Content
+data CliRecvMsg = Response MsgType Content | Update Subscription Content deriving (Eq,Ord,Show)
 
 -- | Client worker environment.
 type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, Content))
@@ -189,7 +189,7 @@ class NetworkingCli t m where
 
 -- | Things server sends -- either replies (to the requested node) or
 -- publishing content.
-data ServSendMsg cliId = Reply cliId MsgType Content | Publish Subscription Content
+data ServSendMsg cliId = Reply cliId MsgType Content | Publish Subscription Content deriving (Eq,Ord,Show)
 
 -- | Listener environment.
 type ListenerEnv t = BiTQueue (CliId t, MsgType, Content) (ServSendMsg (CliId t))

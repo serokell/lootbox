@@ -12,6 +12,7 @@ library:
     - dependent-map
     - dependent-sum
     - lens
+    - lifted-async
     - mtl
     - network
     - serialise
