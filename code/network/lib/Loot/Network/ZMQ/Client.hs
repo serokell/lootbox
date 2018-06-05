@@ -80,7 +80,7 @@ data ZTNetCliEnv = ZTNetCliEnv
 
     , ztClients         :: TVar (Map ClientId ZTClientEnv)
       -- ^ Channels binding broker to clients, map from client name to.
-    , ztSubscriptions   :: TVar (Map Subscription [ClientId])
+    , ztSubscriptions   :: TVar (Map Subscription (Set ClientId))
       -- ^ Map from subscription key to clents' identifiers.
     , ztMsgTypes        :: TVar (Map MsgType ClientId)
       -- ^ Map from msg type key to clents' identifiers.
@@ -174,12 +174,11 @@ runBroker = do
                         lift $ modifyTVar ztMsgTypes $ Map.insert msgT clientId
 
                     -- subscriptions
-                    currentSubs <-
-                        Set.fromList . concat . Map.elems <$> lift (readTVar ztSubscriptions)
+                    currentSubs <- Set.unions . Map.elems <$> lift (readTVar ztSubscriptions)
                     let newSubs = subs `Set.difference` currentSubs
                     lift $ modifyTVar ztSubscriptions $ \s ->
-                        let insertClientId Nothing          = Just [clientId]
-                            insertClientId (Just clientIds) = Just $ L.nub $ clientId : clientIds
+                        let insertClientId Nothing          = Just (Set.singleton clientId)
+                            insertClientId (Just clientIds) = Just $ Set.insert clientId clientIds
                         in foldl' (\prevMap sub -> Map.alter insertClientId sub prevMap) s subs
                     pure newSubs
                 case res of
@@ -188,12 +187,12 @@ runBroker = do
                         forM_ newSubs $ Z.subscribe ztCliSub
 
         -- Clients to backend.
-    let ctb (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
+    let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- ztNodeConnectionId <$> maybe choosePeer pure nodeIdM
             Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", msgT] ++ msg
 
         -- Backend (ROUTER) to clients.
-    let btc = \case
+    let backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
                 Nothing -> putText $ "client btc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
@@ -201,14 +200,16 @@ runBroker = do
                     maybe (putText "client btc: couldn't find client with this message type")
                           (\clientId -> sendToClient clientId (nodeId, Response msgT msg))
                           clientIdM
-            other -> putText $ "client btf: wrong format: " <> show other
+            other -> putText $ "client btc: wrong format: " <> show other
 
         -- SUB to clients.
-    let stc = \case
+    let subToClients = \case
             (k:addr:content) -> resolvePeer addr >>= \case
                 Nothing -> putText $ "client stc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
-                    cids <- atomically $ fromMaybe [] . Map.lookup k <$> readTVar ztSubscriptions
+                    cids <-
+                        atomically $
+                        fromMaybe mempty . Map.lookup k <$> readTVar ztSubscriptions
                     forM_ cids $ \clientId -> sendToClient clientId (nodeId, Update k content)
                     when (null cids) $
                         -- It shouldn't be alright, since it means that our clients
@@ -231,11 +232,11 @@ runBroker = do
                                             , CBSub <$ subStm ] ++ readClient
             case res of
                 CBRequest r             -> processReq r
-                CBClient _cId nIdM cont -> ctb  nIdM cont
+                CBClient _cId nIdM cont -> clientToBackend nIdM cont
                 CBBack                  -> whileM (canReceive ztCliBack) $
-                                           Z.receiveMulti ztCliBack >>= btc
+                                           Z.receiveMulti ztCliBack >>= backendToClients
                 CBSub                   -> whileM (canReceive ztCliSub) $
-                                           Z.receiveMulti ztCliSub >>= stc
+                                           Z.receiveMulti ztCliSub >>= subToClients
     forever action `finally` (backDestroy >> subDestroy)
 
 ----------------------------------------------------------------------------
