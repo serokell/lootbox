@@ -88,7 +88,7 @@ Basic features:
   * TODO Exceptions! safe-exceptions/async. Replace all "error" with
     something well-thought, like MonadThrow/Catch and Maybes/Eithers.
 
-Then test and debug.
+Then test all features and debug.
 
 Pro features:
   * TODO Server side monitoring of incoming connections (for stats?).

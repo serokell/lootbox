@@ -217,20 +217,25 @@ runBroker = do
                         error $ "stf: Nobody got the subscription message for key " <> show k
             other -> putText $ "Client stc: wrong format: " <> show other
 
-    (backStm, backDestroy) <- socketWaitReadSTMLong ztCliBack
-    (subStm, subDestroy) <- socketWaitReadSTMLong ztCliSub
+    (_, backStmTry, backDestroy) <- socketWaitReadSTMLong ztCliBack
+    (_, subStmTry, subDestroy) <- socketWaitReadSTMLong ztCliSub
     let action = liftIO $ do
-            res <- atomically $ do
+            results <- atomically $ do
                 cMap <- readTVar ztClients
-                let readReq = CBRequest <$> TQ.readTQueue (unCliRequestQueue ztCliRequestQueue)
-                let readClient =
-                        map (\(cliId,biq) -> do (nodeIdM,content) <- TQ.readTQueue (bSendQ biq)
-                                                pure $ CBClient cliId nodeIdM content)
+                let readReq =
+                        fmap CBRequest <$>
+                        TQ.tryReadTQueue (unCliRequestQueue ztCliRequestQueue)
+                let readClient :: [STM (Maybe CliBrokerStmRes)]
+                    readClient =
+                        map (\(cliId,biq) ->
+                                fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
+                                TQ.tryReadTQueue (bSendQ biq))
                             (Map.toList cMap)
-                orElseMulti $ NE.fromList $ [ readReq
-                                            , CBBack <$ backStm
-                                            , CBSub <$ subStm ] ++ readClient
-            case res of
+                let boolToMaybe t = bool Nothing (Just t)
+                atLeastOne $ NE.fromList $ [ readReq
+                                           , boolToMaybe CBBack <$> backStmTry
+                                           , boolToMaybe CBSub <$> subStmTry ] ++ readClient
+            forM_ results $ \case
                 CBRequest r             -> processReq r
                 CBClient _cId nIdM cont -> clientToBackend nIdM cont
                 CBBack                  -> whileM (canReceive ztCliBack) $

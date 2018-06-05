@@ -1,16 +1,22 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE NoApplicativeDo #-}
+
+-- Enabling ApplicativeDo leads to https://ghc.haskell.org/trac/ghc/ticket/14105
 
 -- | Provides a poll-like methods to compose STM actions and polls on
 -- ZMQ sockets.
 
 module Loot.Network.ZMQ.Adapter
        ( orElseMulti
+       , atLeastOne
        , threadWaitReadSTMLong
        , socketWaitReadSTMLong
        , canReceive
        ) where
 
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async as A
+import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, newTMVarIO, putTMVar, readTMVar,
+                                     swapTMVar, takeTMVar, tryReadTMVar)
 import Control.Concurrent.STM.TQueue (TQueue, newTQueueIO, readTQueue, writeTQueue)
 import Control.Monad.STM (STM, orElse, retry)
 import Data.List.NonEmpty as NE
@@ -25,6 +31,13 @@ import Loot.Network.Utils (tMeasureIO, whileM)
 -- Functions to export
 ----------------------------------------------------------------------------
 
+-- | Given a set of STM actions, returns all that succeed if at least
+-- one does.
+atLeastOne :: NonEmpty (STM (Maybe a)) -> STM (NonEmpty a)
+atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
+    [] -> retry
+    x:xs -> pure $ x :| xs
+
 -- | Sequential 'orElse' for nonempty list of STM actions.
 orElseMulti :: NonEmpty (STM a) -> STM a
 orElseMulti (x :| [])     = x
@@ -33,23 +46,40 @@ orElseMulti (x :| (y:xs)) = x `orElse` (orElseMulti $ y :| xs)
 -- | Produces stm action corresponding to the action "lock until it is
 -- possible to read from the socket". It doesn't guarantee that there
 -- is actually any data to read from it.
-threadWaitReadSTMLong :: Fd -> IO (STM (), IO ())
+threadWaitReadSTMLong :: Fd -> IO (STM (), STM Bool, IO ())
 threadWaitReadSTMLong fd = do
-    m <- Sync.newTVarIO False
-    t <- Sync.forkIO $ forever $ do
+    -- Bool value inside indicates who should take action now. If it's
+    -- false, it's updater thread, if it's true it's main wait thread.
+    m <- newTMVarIO False
+    -- Fork updater thread.
+    t <- A.async $ forever $ do
+        -- Take the content of the TMVar if it's False, otherwise skip.
+        atomically $ do
+            v <- readTMVar m
+            if v == False
+            then void (takeTMVar m)
+            else retry
         G.threadWaitRead fd
-        Sync.atomically $ Sync.writeTVar m True
-    let waitAction = do b <- Sync.readTVar m
-                        if b then Sync.writeTVar m False else retry
-    let killAction = Sync.killThread t
-    return (waitAction, killAction)
+        atomically $ putTMVar m True
+    let waitAction = do
+            v <- readTMVar m
+            if v == True
+            then void (swapTMVar m False) -- We now pass flag to another thread
+            else retry                    -- Another thread haven't yet taken the lock
+    let tryAction =
+            tryReadTMVar m >>= \case
+                Nothing -> pure False -- updater thread is blocking
+                Just False -> pure False -- content has already been taken
+                Just True -> True <$ void (swapTMVar m True)
+    let killAction = A.cancel t
+    return (waitAction, tryAction, killAction)
 
 -- | 'threadWaitReadSTMLong' adapted for sockets.
-socketWaitReadSTMLong :: (MonadIO m) => Z.Socket t -> m (STM (), m ())
+socketWaitReadSTMLong :: (MonadIO m) => Z.Socket t -> m (STM (), STM Bool, m ())
 socketWaitReadSTMLong s = liftIO $ do
     fd <- Z.fileDescriptor s
-    (stm, destroy) <- threadWaitReadSTMLong fd
-    pure (stm, liftIO destroy)
+    (stmWait, stmTry, destroy) <- threadWaitReadSTMLong fd
+    pure (stmWait, stmTry, liftIO destroy)
 
 -- | Checks if data can be received from the socket. Use @whileM
 -- canReceive process@ pattern after the STM action on the needed
@@ -119,7 +149,7 @@ pollBoth :: Z.Socket Z.Dealer -> TQueue Msg -> TQueue Msg -> IO ()
 pollBoth sock qPut qGrab = do
     --putTextLn "pollBoth starting"
     fd <- Z.fileDescriptor sock
-    (waitForSocket,closeSocketListener) <- threadWaitReadSTMLong fd
+    (waitForSocket,_, closeSocketListener) <- threadWaitReadSTMLong fd
     let action = do
             --putTextLn "pollBoth: round"
             --putTextLn "pollBoth: running stm"
@@ -141,6 +171,32 @@ pollBoth sock qPut qGrab = do
               ReadQueue (x:|xs) -> Z.sendMulti sock ("":|(x:xs))
     forever action `finally` closeSocketListener
 
+data ATL = V1 | V2 | V3 | V4 deriving Show
+
+{-
+Prints:
+V2 :| [V4]
+V1 :| [V3]
+V1 :| [V2,V3,V4]
+-}
+_testAtLeastOne :: IO ()
+_testAtLeastOne = do
+    [(v1 :: TMVar ()),v2,v3,v4] <- replicateM 4 newEmptyTMVarIO
+    let wait1 = threadDelay 1000000
+    void $ forkIO $ forever $ do
+        wait1
+        results <- atomically $ do
+            let cast t v = maybe (pure Nothing) (\_ -> Just t <$ takeTMVar v) =<< tryReadTMVar v
+            atLeastOne $ NE.fromList [cast V1 v1, cast V2 v2, cast V3 v3, cast V4 v4]
+        print results
+    let putVars (l :: [TMVar ()]) = atomically $ forM_ l $ \i -> putTMVar i ()
+    threadDelay 500000
+    putVars [v2,v4]
+    wait1
+    putVars [v1,v3]
+    wait1
+    putVars [v1,v2,v3,v4]
+    wait1
 
 _test :: IO ()
 _test = do

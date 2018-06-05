@@ -136,19 +136,24 @@ runBroker = do
                       atomically $ TQ.writeTQueue (bReceiveQ biQ) (ZTCliId cId, msgT, msg)
             _ -> putText "frontToListener: wrong format"
 
-    (frontStm, frontDestroy) <- socketWaitReadSTMLong ztServFront
-    -- TODO add heartbeating trigger action (or worker?).
+    (_, frontStmTry, frontDestroy) <- socketWaitReadSTMLong ztServFront
+    -- TODO add heartbeating trigger worker sending new type SBRequest.
     let action = liftIO $ do
-            res <- atomically $ do
+            results <- atomically $ do
                 lMap <- readTVar ztListeners
-                let readReq = SBRequest <$> TQ.readTQueue (unServRequestQueue ztServRequestQueue)
-                let readListener =
-                        map (\(listId,biq) -> do content <- TQ.readTQueue (bSendQ biq)
-                                                 pure $ SBListener listId content)
+                let readReq =
+                        fmap SBRequest <$>
+                        TQ.tryReadTQueue (unServRequestQueue ztServRequestQueue)
+                let readListeners :: [STM (Maybe ServBrokerStmRes)]
+                    readListeners =
+                        map (\(listId,biq) ->
+                               fmap (\content -> SBListener listId content) <$>
+                               TQ.tryReadTQueue (bSendQ biq))
                             (Map.toList lMap)
-                orElseMulti $ NE.fromList $ [ readReq
-                                            , SBFront <$ frontStm ] ++ readListener
-            case res of
+                atLeastOne $ NE.fromList $ [ readReq
+                                           , (bool Nothing (Just SBFront)) <$> frontStmTry ]
+                                           ++ readListeners
+            forM_ results $ \case
                 SBRequest r         -> processReq r
                 SBListener _lId msg -> processMsg msg
                 SBFront             -> whileM (canReceive ztServFront) $
