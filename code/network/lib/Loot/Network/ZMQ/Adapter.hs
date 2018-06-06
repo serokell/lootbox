@@ -6,8 +6,7 @@
 -- ZMQ sockets.
 
 module Loot.Network.ZMQ.Adapter
-       ( orElseMulti
-       , atLeastOne
+       ( atLeastOne
        , threadWaitReadSTMLong
        , socketWaitReadSTMLong
        , canReceive
@@ -36,11 +35,6 @@ atLeastOne :: NonEmpty (STM (Maybe a)) -> STM (NonEmpty a)
 atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
     [] -> retry
     x:xs -> pure $ x :| xs
-
--- | Sequential 'orElse' for nonempty list of STM actions.
-orElseMulti :: NonEmpty (STM a) -> STM a
-orElseMulti (x :| [])     = x
-orElseMulti (x :| (y:xs)) = x `orElse` (orElseMulti $ y :| xs)
 
 -- | Produces stm action corresponding to the action "lock until it is
 -- possible to read from the socket". It doesn't guarantee that there
@@ -143,6 +137,10 @@ _testWaitSTM sock = do
 type Msg = NonEmpty ByteString
 
 data WaitRes  = ReadSock | ReadQueue Msg deriving Show
+
+-- | Sequential 'orElse' for nonempty list of STM actions.
+orElseMulti :: NonEmpty (STM a) -> STM a
+orElseMulti = foldr1 orElse
 
 pollBoth :: Z.Socket Z.Dealer -> TQueue Msg -> TQueue Msg -> IO ()
 pollBoth sock qPut qGrab = do

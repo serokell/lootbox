@@ -14,12 +14,11 @@ module Loot.Network.Utils
     , whileM
     ) where
 
+import Control.Lens (LensLike)
 import Data.Coerce (coerce)
 import Data.Tagged (Tagged (..))
 import qualified Data.Time.Clock as Tm
 import Numeric as N
-
-type LensLike f s t a b = (a -> f b) -> s -> f t
 
 class HasLens tag outer inner | tag outer -> inner where
     lensOf :: Lens' outer inner

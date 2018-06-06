@@ -1,10 +1,12 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE KindSignatures            #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeFamilyDependencies    #-}
 
--- | Networking utilities. Playground for now.
+-- TODO document better
+-- | Messages and message-dependent callbacks matching.
 
 module Loot.Network.Message
        ( Message (..)
@@ -16,6 +18,8 @@ module Loot.Network.Message
        , runCallbackInt
        ) where
 
+import Codec.Serialise (Serialise (..), deserialise)
+import qualified Data.ByteString.Lazy as BSL
 import Data.Dependent.Map (DSum ((:=>)))
 import qualified Data.Dependent.Map as D
 import Data.GADT.Compare ((:~:) (Refl), GEq (..), GOrdering (..))
@@ -23,7 +27,9 @@ import Data.Reflection (reifyNat)
 import Data.Singletons.TypeLits hiding (natVal)
 import Unsafe.Coerce (unsafeCoerce)
 
-class (KnownNat (MsgTag d), Binary d) => Message d where
+-- | Message is a type that has unique message type (expressed by
+-- 'Nat' type family instance).
+class (KnownNat (MsgTag d), Serialise d) => Message d where
     type family MsgTag d = (n :: Nat) | n -> d
 
 -- | Action called on a particular type.
@@ -64,14 +70,13 @@ createDMap callbacks =
 
 -- | Executes a callback given a dmap, switching integer and BS.
 runCallback :: D.DMap Sing (Callback m a) -> SNat n -> ByteString -> m a
-runCallback dmap sn bs = case dmap D.! sn of (Callback x) -> x (parse bs)
+runCallback dmap sn bs =
+    case dmap D.! sn of (Callback x) -> x (deserialise (BSL.fromStrict bs))
 
 -- | Same as 'runCallback', but accepts value-level integer.
 runCallbackInt :: D.DMap Sing (Callback m a) -> Integer -> ByteString -> m a
 runCallbackInt dmap i bs =
     reifyNat i $ \(Proxy :: Proxy n) -> runCallback dmap (SNat :: SNat n) bs
-
-
 
 ----------------------------------------------------------------------------
 -- Testing
@@ -81,24 +86,20 @@ data Msg1 = Msg1 String
 data Msg2 = Msg2 Integer
 data Msg3 = Msg3 Double
 
-class Binary b where
-    parse :: ByteString -> b
+instance Serialise Msg1 where
+    encode = error "test"
+    decode = pure $ Msg1 "wow,parsed)))"
+instance Serialise Msg2 where
+    encode = error "test"
+    decode = pure $ Msg2 10
+instance Serialise Msg3 where
+    encode = error "test"
+    decode = pure $ Msg3 1.2345
 
-instance Binary Msg1 where
-    parse _ = Msg1 "wow,parsed)))"
-instance Binary Msg2 where
-    parse _ = Msg2 10
-instance Binary Msg3 where
-    parse _ = Msg3 1.2345
-
-
-instance Message Msg1 where
-    type MsgTag Msg1 = 1
-instance Message Msg2 where
-    type MsgTag Msg2 = 2
-instance Message Msg3 where
-    type MsgTag Msg3 = 3 -- it's an error if you put "2" here,
-                               -- thanks to injective type families
+instance Message Msg1 where type MsgTag Msg1 = 1
+instance Message Msg2 where type MsgTag Msg2 = 2
+-- it's an error if you put "2" here, thanks to injective type families
+instance Message Msg3 where type MsgTag Msg3 = 3
 
 _test :: IO ()
 _test = do
