@@ -81,12 +81,13 @@ Done:
   * Subscriptions
   * Client-worker by tag/type (Router on server back instead of Dealer)
   * Choose node when sending a message from client (Router, not Dealer)
-  * TODO Client-side message routing (msgType-based).
+  * Client-side message routing (msgType-based).
+  * Heartbeating
 
 Basic features:
-  * TODO Heartbeating
   * TODO Exceptions! safe-exceptions/async. Replace all "error" with
     something well-thought, like MonadThrow/Catch and Maybes/Eithers.
+  * Also logging?
 
 Then test all features and debug.
 

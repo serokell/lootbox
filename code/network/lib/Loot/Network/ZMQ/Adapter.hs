@@ -69,7 +69,7 @@ threadWaitReadSTMLong fd = do
             tryReadTMVar m >>= \case
                 Nothing -> pure False -- updater thread is blocking
                 Just False -> pure False -- content has already been taken
-                Just True -> True <$ void (swapTMVar m True)
+                Just True -> True <$ void (swapTMVar m False)
     let killAction = A.cancel t
     return (waitAction, tryAction, killAction)
 

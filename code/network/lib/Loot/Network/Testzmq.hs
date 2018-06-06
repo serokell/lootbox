@@ -61,14 +61,27 @@ testZmq = do
                         (cId, msgT, content) <- TQ.readTQueue (bReceiveQ biQ)
                         when (msgT == "ping" && content == [""]) $
                             TQ.writeTQueue (bSendQ biQ) (Reply cId "pong" [""])
+            let servWithCancel = do
+                    s1 <- A.async $ runServer @ZmqTcp
+                    liftIO $ do
+                        threadDelay 5000000
+                        putTextLn "------Killing"
+                        A.cancel s1
+                        putTextLn "------Killed, waiting"
+                        threadDelay 10000000
+                        putTextLn "------Restarting"
+                    runServer @ZmqTcp
             let server = do
                     biQ <- registerListener @ZmqTcp "ponger" (Set.fromList ["ping"])
-                    void $ A.concurrently (runPonger biQ) (runServer @ZmqTcp)
+                    void $ A.concurrently (runPonger biQ) servWithCancel
             liftIO $ threadDelay 100000
             putTextLn "starting server"
             runZMQ n1 server pass
     let node2 = do
             let runPinger biQ = forever $ do
+                    -- disabled for now
+                    liftIO $ threadDelay 1000000000000
+
                     liftIO $ threadDelay 1000000
                     putTextLn "sending ping"
                     atomically $ TQ.writeTQueue (bSendQ biQ) (Just n1, ("ping",[""]))

@@ -29,6 +29,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Random (randomIO)
+import qualified Text.Show as T
 
 import qualified System.ZMQ4 as Z
 
@@ -36,7 +37,7 @@ import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
-                                ztNodeConnectionId, ztNodeIdRouter)
+                                ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
 
 ----------------------------------------------------------------------------
 -- Heartbeats
@@ -72,12 +73,12 @@ updateHeartbeat :: TVar (Map ZTNodeId HBState) -> ZTNodeId -> IO ()
 updateHeartbeat states nodeId = do
     let modAction Nothing    = error "updateHeartbeat: uninitalised"
         modAction (Just hbs) = Just $ hbs & hbLiveness .~ hbLivenessMax
+                                          & hbInterval .~ hbIntervalMin
     atomically $ modifyTVar states $ at nodeId %~ modAction
+    putTextLn "updHeartbeat"
 
 heartbeatWorker :: ZTNetCliEnv -> IO ()
 heartbeatWorker cliEnv = do
-    -- Wait until everything is initialised (heuristically).
-    threadDelay 2000000
     forever $ do
         threadDelay 50000
         curTime <- getCurrentTimeMS
@@ -99,16 +100,17 @@ heartbeatWorker cliEnv = do
             hbMap <- readTVar (ztHeartbeatInfo cliEnv)
             let (toReconnect,hbMap') = modMap hbMap
             writeTVar (ztHeartbeatInfo cliEnv) hbMap'
-            TQ.writeTQueue (unCliRequestQueue $ ztCliRequestQueue cliEnv) $
-                IRReconnect toReconnect
+            unless (Set.null toReconnect) $
+                TQ.writeTQueue (unCliRequestQueue $ ztCliRequestQueue cliEnv)
+                               (IRReconnect toReconnect)
 
 ----------------------------------------------------------------------------
 -- Internal requests
 ----------------------------------------------------------------------------
 
 data UpdatePeersReq = UpdatePeersReq
-    { purAdd :: Set ZTNodeId
-    , purDel :: Set ZTNodeId
+    { uprAdd :: Set ZTNodeId
+    , uprDel :: Set ZTNodeId
     } deriving (Show, Generic)
 
 data InternalRequest
@@ -116,12 +118,17 @@ data InternalRequest
     | IRRegister ClientId (Set MsgType) (Set Subscription) ZTClientEnv
     | IRReconnect (Set ZTNodeId)
 
+instance T.Show InternalRequest where
+    show (IRUpdatePeers r)      = "IRUpdatePeers: " <> show r
+    show (IRRegister cId _ _ _) = "IRRegister " <> show cId
+    show (IRReconnect nids)     = "IRReconnect" <> show nids
+
 applyUpdatePeers ::
        Set ZTNodeId -> UpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
 applyUpdatePeers peers (UpdatePeersReq {..}) = do
-    let both = purDel `Set.intersection` purAdd
-    let add' = (purAdd `Set.difference` both) `Set.difference` peers
-    let del' = (purDel `Set.difference` both) `Set.intersection` peers
+    let both = uprDel `Set.intersection` uprAdd
+    let add' = (uprAdd `Set.difference` both) `Set.difference` peers
+    let del' = (uprDel `Set.difference` both) `Set.intersection` peers
     (add',del')
 
 newtype CliRequestQueue = CliRequestQueue { unCliRequestQueue :: TQueue InternalRequest }
@@ -176,15 +183,63 @@ createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
     forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
+    Z.subscribe ztCliSub heartbeatSubscription
+    forM_ peers $ Z.connect ztCliSub . ztNodeIdPub
 
     ztClients <- newTVarIO mempty
-    ztPeers <- newTVarIO peers
+    ztPeers <- newTVarIO mempty
     ztHeartbeatInfo <- newTVarIO mempty -- initialise it later
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
 
-    pure ZTNetCliEnv {..}
+    let cliEnv = ZTNetCliEnv {..}
+    changePeers cliEnv $ UpdatePeersReq { uprAdd = peers, uprDel = mempty }
+    pure cliEnv
+
+changePeers :: MonadIO m => ZTNetCliEnv -> UpdatePeersReq -> m ()
+changePeers ZTNetCliEnv{..} req = liftIO $ do
+    curTime <- getCurrentTimeMS
+    (toConnect,toDisconnect) <- atomically $ do
+        peers <- readTVar ztPeers
+        let (toAdd,toDel) = applyUpdatePeers peers req
+        let peers' = (peers `Set.difference` toDel) `Set.union` toAdd
+        writeTVar ztPeers $! peers'
+        -- 2 seconds heuristical delay before heartbeating worker
+        -- starts noticing these nodes.
+        let initHbs = HBState hbIntervalMin hbLivenessMax (curTime + 2000) False
+        modifyTVar ztHeartbeatInfo $
+            foldr (.) id (map (\nId -> at nId .~ Nothing) (Set.toList toDel)) .
+            foldr (.) id (map (\nId -> at nId .~ Just initHbs) (Set.toList toAdd))
+        pure (toAdd,toDel)
+    forM_ toDisconnect $ \z -> do
+        Z.disconnect ztCliBack $ ztNodeIdRouter z
+        Z.disconnect ztCliSub $ ztNodeIdPub z
+    forM_ toConnect $ \z -> do
+        Z.connect ztCliBack $ ztNodeIdRouter z
+        Z.connect ztCliSub $ ztNodeIdPub z
+
+reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
+reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
+    putTextLn $ "Reconnecting: " <> show nIds
+
+    forM_ nIds $ \nId -> do
+        Z.disconnect ztCliBack (ztNodeIdRouter nId)
+        Z.connect ztCliBack (ztNodeIdRouter nId)
+        Z.disconnect ztCliSub (ztNodeIdPub nId)
+        Z.connect ztCliSub (ztNodeIdPub nId)
+    curTime <- getCurrentTimeMS
+    atomically $ do
+        let mulTwoMaybe x | x >= hbIntervalMax = x
+                          | otherwise = 2 * x
+        let upd Nothing = error "IRReconnect: can't update, nothing -- impossible"
+            upd (Just hbs) =
+                let newInterval = mulTwoMaybe (hbs ^. hbInterval)
+                in Just $ hbs & hbInactive .~ False
+                              & hbInterval .~ newInterval
+                              & hbNextPoll .~ (curTime + newInterval)
+        modifyTVar ztHeartbeatInfo $ \hbInfo ->
+            foldl' (\m nId -> m & at nId %~ upd) hbInfo nIds
 
 ----------------------------------------------------------------------------
 -- Methods
@@ -194,7 +249,7 @@ data CliBrokerStmRes
     = CBClient ClientId (Maybe ZTNodeId) (MsgType, Content)
     | CBBack
     | CBSub
-    | CBRequest InternalRequest
+    | CBRequest InternalRequest deriving Show
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
@@ -216,24 +271,15 @@ runBroker = do
             res <- atomically $ do
                 cMap <- readTVar ztClients
                 let toWrite = bReceiveQ <$> Map.lookup clientId cMap
-                maybe pass (\tq -> TQ.writeTQueue tq (nId,content)) toWrite
+                whenJust toWrite $ \tq -> TQ.writeTQueue tq (nId,content)
                 pure $ isJust toWrite
             unless res $ putText $ "sendToClient: cId doesn't exist: " <> show clientId
 
     let onHeartbeat addr = liftIO $ updateHeartbeat ztHeartbeatInfo addr
 
-        -- Processing internal requests.
     let processReq = \case
-            IRUpdatePeers req -> do
-                (toConnect,toDisconnect) <- atomically $ do
-                    peers <- readTVar ztPeers
-                    let (toAdd,toDel) = applyUpdatePeers peers req
-                    let peers' = (peers `Set.difference` toDel) `Set.union` toAdd
-                    writeTVar ztPeers $! peers'
-                    pure (toAdd,toDel)
-                liftIO $ do
-                    forM_ toDisconnect $ Z.disconnect ztCliBack . ztNodeIdRouter
-                    forM_ toConnect $ Z.connect ztCliBack . ztNodeIdRouter
+            IRUpdatePeers req -> changePeers cEnv req
+            IRReconnect nIds -> reconnectPeers cEnv nIds
             IRRegister clientId msgTs subs biQ -> do
                 res <- atomically $ runExceptT $ do
                     -- check predicates
@@ -255,22 +301,21 @@ runBroker = do
                         let insertClientId Nothing          = Just (Set.singleton clientId)
                             insertClientId (Just clientIds) = Just $ Set.insert clientId clientIds
                         in foldl' (\prevMap sub -> Map.alter insertClientId sub prevMap) s subs
+
                     pure newSubs
                 case res of
-                    Left e -> error $ "Client IRRegister: " <> e
-                    Right newSubs -> do
-                        forM_ newSubs $ Z.subscribe ztCliSub
-            IRReconnect _nIds -> undefined -- TODO
-        -- Clients to backend.
+                    Left e        -> error $ "Client IRRegister: " <> e
+                    Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub
+
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- ztNodeConnectionId <$> maybe choosePeer pure nodeIdM
             Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", msgT] ++ msg
 
-        -- Backend (ROUTER) to clients.
     let backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
                 Nothing -> putText $ "client btc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
+                    --putTextLn $ "client btc: " <> show msgT
                     onHeartbeat nodeId
                     clientIdM <- atomically $ Map.lookup msgT <$> readTVar ztMsgTypes
                     maybe (putText "client btc: couldn't find client with this message type")
@@ -278,11 +323,11 @@ runBroker = do
                           clientIdM
             other -> putText $ "client btc: wrong format: " <> show other
 
-        -- SUB to clients.
     let subToClients = \case
             (k:addr:content) -> resolvePeer addr >>= \case
                 Nothing -> putText $ "Client stc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
+                    --putTextLn $ "client stc: " <> show (k,content)
                     onHeartbeat nodeId
                     unless (k == heartbeatSubscription) $ do
                         cids <-
@@ -319,6 +364,7 @@ runBroker = do
                 atLeastOne $ NE.fromList $ [ readReq
                                            , boolToMaybe CBBack <$> backStmTry
                                            , boolToMaybe CBSub <$> subStmTry ] ++ readClient
+            --putTextLn $ "client main thread: " <> show results
             forM_ results $ \case
                 CBRequest r             -> processReq r
                 CBClient _cId nIdM cont -> clientToBackend nIdM cont

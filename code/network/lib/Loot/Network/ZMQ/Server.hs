@@ -142,34 +142,35 @@ runBroker = do
                       atomically $ TQ.writeTQueue (bReceiveQ biQ) (ZTCliId cId, msgT, msg)
             _ -> putText "frontToListener: wrong format"
 
-    hbWorker <- liftIO $ A.async $ forever $ do
-        let heartbeatInterval = 300000 -- 300 ms
-        threadDelay heartbeatInterval
-        atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
+    let hbWorker = forever $ do
+            let heartbeatInterval = 300000 -- 300 ms
+            threadDelay heartbeatInterval
+            atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
-    (_, frontStmTry, frontDestroy) <- socketWaitReadSTMLong ztServFront
-    -- TODO add heartbeating trigger worker sending new type SBRequest.
-    let action = liftIO $ do
-            results <- atomically $ do
-                lMap <- readTVar ztListeners
-                let readReq =
-                        fmap SBRequest <$>
-                        TQ.tryReadTQueue (unServRequestQueue ztServRequestQueue)
-                let readListeners :: [STM (Maybe ServBrokerStmRes)]
-                    readListeners =
-                        map (\(listId,biq) ->
-                               fmap (\content -> SBListener listId content) <$>
-                               TQ.tryReadTQueue (bSendQ biq))
-                            (Map.toList lMap)
-                atLeastOne $ NE.fromList $ [ readReq
-                                           , (bool Nothing (Just SBFront)) <$> frontStmTry ]
-                                           ++ readListeners
-            forM_ results $ \case
-                SBRequest r         -> processReq r
-                SBListener _lId msg -> processMsg msg
-                SBFront             -> whileM (canReceive ztServFront) $
-                                       Z.receiveMulti ztServFront >>= frontToListener
-    forever action `finally` (frontDestroy >> liftIO (A.cancel hbWorker))
+    liftIO $ A.concurrently_ hbWorker $ do
+      (_, frontStmTry, frontDestroy) <- socketWaitReadSTMLong ztServFront
+      -- TODO add heartbeating trigger worker sending new type SBRequest.
+      let action = liftIO $ do
+              results <- atomically $ do
+                  lMap <- readTVar ztListeners
+                  let readReq =
+                          fmap SBRequest <$>
+                          TQ.tryReadTQueue (unServRequestQueue ztServRequestQueue)
+                  let readListeners :: [STM (Maybe ServBrokerStmRes)]
+                      readListeners =
+                          map (\(listId,biq) ->
+                                 fmap (\content -> SBListener listId content) <$>
+                                 TQ.tryReadTQueue (bSendQ biq))
+                              (Map.toList lMap)
+                  atLeastOne $ NE.fromList $ [ readReq
+                                             , (bool Nothing (Just SBFront)) <$> frontStmTry ]
+                                             ++ readListeners
+              forM_ results $ \case
+                  SBRequest r         -> processReq r
+                  SBListener _lId msg -> processMsg msg
+                  SBFront             -> whileM (canReceive ztServFront) $
+                                         Z.receiveMulti ztServFront >>= frontToListener
+      forever action `finally` frontDestroy
 
 registerListener ::
        (MonadReader r m, HasLens' r ServRequestQueue, MonadIO m)
