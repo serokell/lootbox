@@ -16,23 +16,21 @@ and, in particular, some relevant patterns:
   http://zguide.zeromq.org/page:all#toc49
 * One-way heartbeating using PUB/SUB (because it's a recommended way)
 
-TODO <Picture here>
+Server:
+* Binds to two ports: ROUTER and PUSH
+* Runs "server broker" in a main thread, which routes requests from
+  frontend (ROUTER) to listeners. In other direction, it propagates
+  replies and publications from listeners to the outer world.
 
-Some other important things that will be well-documented in future:
-1. Server binds to two ports: ROUTER and PUSH
-2. It runs "server broker" in a main thread, which routes requests from
-   frontend (ROUTER) to listeners. In other direction, it propagates
-   replies and publications from listeners to the outer world.
-3. Client has ROUTER backend to talk to servers and PULL to receive updates.
-4. It also has broker called "client broker" which connects a number
-   of client threads (that want to talk to network) to the broker
-   frontend (ROUTER). Broker gets messages from the frontend (worker requests)
-   and propagates them to backend, which sends them to the network.
-   Broker also gets messages from the PULL and propagates them to
-   a worker that "subscribed" to this kind of update.
+Client:
+* Has ROUTER backend to talk to servers and PULL to receive updates.
+* It also has broker called "client broker" which connects a number
+  of client threads (that want to talk to network) to the broker
+  frontend (ROUTER). Broker gets messages from the frontend (worker requests)
+  and propagates them to backend, which sends them to the network.
+  Broker also gets messages from the PULL and propagates them to
+  a worker that "subscribed" to this kind of update.
 
-Server: broker (ROUTER front/ROUTER back/PUB publisher) + listener workers (BiTQueue)
-Client broker (ROUTER front/ROUTER back/SUB subscriber) + client workers (BiTQueue)
 
 Tasklist
 ========
@@ -55,15 +53,10 @@ Pro features:
   * TODO Server side monitoring of incoming connections (for stats?).
   * TODO Smart heartbeating? (different peers -- different frequency
     that we should agree on beforehand
-  * TODO Discovery
-  * TODO Load balancing on server backend. TODO Read "majordomo" pattern again.
-  * TODO Pub/Sub envelopes with publisher's address.
+  * TODO Discovery.
+  * TODO Application-level load balancing.
   * TODO Smart broadcasting (client -> [set of peers] instead of PUB)
-  * TODO Limits
-  * TODO Listeners supporting multiple message types. This is not hard
-    todo, but is it really needed?
-  * TODO Heartbeating between broker and workers (ZMQ's PPP), to handle
-    workers/broker failures.
+  * TODO Message limits
   * TODO Load balancing on client backend -- choosing peer to connect based
     on its ping/average response speed/etc.
 -}

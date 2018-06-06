@@ -230,7 +230,7 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
     atomically $ do
         let mulTwoMaybe x | x >= hbIntervalMax = x
                           | otherwise = 2 * x
-        let upd Nothing = error "IRReconnect: can't update, nothing -- impossible"
+        let upd Nothing = error "reconnectPeers: can't upd, got nothing"
             upd (Just hbs) =
                 let newInterval = mulTwoMaybe (hbs ^. hbInterval)
                 in Just $ hbs & hbInactive .~ False

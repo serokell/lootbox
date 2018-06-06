@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
--- | Common types and functions.
+-- | Common ZMQ TCP types and functions.
 
 module Loot.Network.ZMQ.Common
     ( ZmqTcp
@@ -29,6 +29,7 @@ import Loot.Network.Class (Subscription (..))
 -- | Networking tag type for ZMQ over TCP.
 data ZmqTcp
 
+-- | Global environment needed for client/server initialisation.
 data ZTGlobalEnv = ZTGlobalEnv
     { _ztContext :: Z.Context
     }
@@ -43,10 +44,11 @@ withZTGlobalEnv action =
 endpointTcp :: String -> Integer -> String
 endpointTcp h p = "tcp://" <> h <> ":" <> show p
 
+-- | NodeId as seen in ZMQ TCP.
 data ZTNodeId = ZTNodeId
-    { ztIdHost       :: String
-    , ztIdRouterPort :: Integer
-    , ztIdPubPort    :: Integer
+    { ztIdHost       :: String  -- ^ Host.
+    , ztIdRouterPort :: Integer -- ^ Port for ROUTER socket.
+    , ztIdPubPort    :: Integer -- ^ Port for PUB socket.
     } deriving (Eq, Ord, Show, Generic)
 
 instance Serialise ZTNodeId
@@ -75,4 +77,4 @@ ztNodeConnectionId ZTNodeId{..} =
 
 -- | Key for heartbeat subscription.
 heartbeatSubscription :: Subscription
-heartbeatSubscription = Subscription "HRTBT"
+heartbeatSubscription = Subscription "_hb"
