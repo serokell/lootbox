@@ -23,6 +23,7 @@ import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
+import Loot.Network.Class (Subscription (..))
 
 
 -- | Networking tag type for ZMQ over TCP.
@@ -73,5 +74,5 @@ ztNodeConnectionId ZTNodeId{..} =
        (Z.toRestricted (BS8.pack sid) :: Maybe (Z.Restricted (Z.N1, Z.N254) ByteString))
 
 -- | Key for heartbeat subscription.
-heartbeatSubscription :: ByteString
-heartbeatSubscription = "HRTBT"
+heartbeatSubscription :: Subscription
+heartbeatSubscription = Subscription "HRTBT"

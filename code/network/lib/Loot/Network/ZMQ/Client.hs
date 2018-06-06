@@ -181,7 +181,7 @@ createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
     forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
-    Z.subscribe ztCliSub heartbeatSubscription
+    Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
     forM_ peers $ Z.connect ztCliSub . ztNodeIdPub
 
     ztClients <- newTVarIO mempty
@@ -293,7 +293,7 @@ runBroker = do
                         lift $ modifyTVar ztMsgTypes $ Map.insert msgT clientId
 
                     -- subscriptions
-                    currentSubs <- Set.unions . Map.elems <$> lift (readTVar ztSubscriptions)
+                    currentSubs <- Set.fromList . Map.keys <$> lift (readTVar ztSubscriptions)
                     let newSubs = subs `Set.difference` currentSubs
                     lift $ modifyTVar ztSubscriptions $ \s ->
                         let insertClientId Nothing          = Just (Set.singleton clientId)
@@ -303,11 +303,11 @@ runBroker = do
                     pure newSubs
                 case res of
                     Left e        -> error $ "Client IRRegister: " <> e
-                    Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub
+                    Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- ztNodeConnectionId <$> maybe choosePeer pure nodeIdM
-            Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", msgT] ++ msg
+            Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", unMsgType msgT] ++ msg
 
     let backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
@@ -315,9 +315,10 @@ runBroker = do
                 Just nodeId -> do
                     --putTextLn $ "client btc: " <> show msgT
                     onHeartbeat nodeId
-                    clientIdM <- atomically $ Map.lookup msgT <$> readTVar ztMsgTypes
+                    clientIdM <-
+                        atomically $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     maybe (putText "client btc: couldn't find client with this message type")
-                          (\clientId -> sendToClient clientId (nodeId, Response msgT msg))
+                          (\clientId -> sendToClient clientId (nodeId, Response (MsgType msgT) msg))
                           clientIdM
             other -> putText $ "client btc: wrong format: " <> show other
 
@@ -325,15 +326,16 @@ runBroker = do
             (k:addr:content) -> resolvePeer addr >>= \case
                 Nothing -> putText $ "Client stc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
+                    let k' = Subscription k
                     --putTextLn $ "client stc: " <> show (k,content)
                     onHeartbeat nodeId
-                    unless (k == heartbeatSubscription) $ do
+                    unless (k' == heartbeatSubscription) $ do
                         cids <-
                             atomically $
-                            fromMaybe mempty . Map.lookup k <$>
+                            fromMaybe mempty . Map.lookup k' <$>
                             readTVar ztSubscriptions
                         forM_ cids $ \clientId ->
-                          sendToClient clientId (nodeId, Update k content)
+                          sendToClient clientId (nodeId, Update k' content)
                         when (null cids) $
                             -- It shouldn't be alright, since it means
                             -- that our clients records are broken

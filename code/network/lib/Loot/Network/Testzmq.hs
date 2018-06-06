@@ -11,28 +11,26 @@ import qualified Data.Set as Set
 
 import Loot.Network.Class
 import Loot.Network.Utils (HasLens (..))
-import qualified Loot.Network.ZMQ.Client as ZC
-import Loot.Network.ZMQ.Common
+import Loot.Network.ZMQ
 import Loot.Network.ZMQ.Instance ()
-import qualified Loot.Network.ZMQ.Server as ZS
 
 ----------------------------------------------------------------------------
 -- State
 ----------------------------------------------------------------------------
 
 data BigState = BigState
-    { _bsCli  :: ZC.ZTNetCliEnv
-    , _bsServ :: ZS.ZTNetServEnv
+    { _bsCli  :: ZTNetCliEnv
+    , _bsServ :: ZTNetServEnv
     , _bsCtx  :: ZTGlobalEnv
     }
 
 makeLenses ''BigState
 
 
-instance HasLens ZC.ZTNetCliEnv BigState ZC.ZTNetCliEnv where
+instance HasLens ZTNetCliEnv BigState ZTNetCliEnv where
     lensOf = bsCli
 
-instance HasLens ZS.ZTNetServEnv BigState ZS.ZTNetServEnv where
+instance HasLens ZTNetServEnv BigState ZTNetServEnv where
     lensOf = bsServ
 
 instance HasLens ZTGlobalEnv BigState ZTGlobalEnv where
@@ -47,8 +45,8 @@ type Env a = ReaderT BigState IO a
 runZMQ :: ZTNodeId -> Env () -> Env () -> IO ()
 runZMQ nId server client = do
     withZTGlobalEnv $ \ztEnv -> do
-        cliEnv <- ZC.createNetCliEnv ztEnv mempty
-        servEnv <- ZS.createNetServEnv ztEnv nId
+        cliEnv <- createNetCliEnv ztEnv mempty
+        servEnv <- createNetServEnv ztEnv nId
         flip runReaderT (BigState cliEnv servEnv ztEnv) $ do
             void $ A.concurrently server client
 

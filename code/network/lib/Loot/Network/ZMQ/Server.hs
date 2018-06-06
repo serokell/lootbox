@@ -107,7 +107,7 @@ runBroker = do
 
     let publish k v =
             Z.sendMulti ztServPub $
-            NE.fromList $ [k,ztNodeConnectionId ztOurNodeId] ++ v
+            NE.fromList $ [unSubscription k,ztNodeConnectionId ztOurNodeId] ++ v
 
     let processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
@@ -128,18 +128,19 @@ runBroker = do
     let processMsg = \case
             Reply cId msgT msg ->
                 Z.sendMulti ztServFront $
-                NE.fromList $ [unZtCliId cId,"",msgT] ++ msg
+                NE.fromList $ [unZtCliId cId,"",unMsgType msgT] ++ msg
             Publish k v -> publish k v
 
     let frontToListener = \case
             (cId:"":msgT:msg) -> do
                 ztEnv <- atomically $ runMaybeT $ do
-                    lId <- MaybeT $ Map.lookup msgT <$> readTVar ztMsgTypes
+                    lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
                 case ztEnv of
                   Nothing  -> putText "frontToListener: can't resolve msgT"
                   Just biQ ->
-                      atomically $ TQ.writeTQueue (bReceiveQ biQ) (ZTCliId cId, msgT, msg)
+                      atomically $ TQ.writeTQueue (bReceiveQ biQ)
+                                                  (ZTCliId cId, MsgType msgT, msg)
             _ -> putText "frontToListener: wrong format"
 
     let hbWorker = forever $ do
