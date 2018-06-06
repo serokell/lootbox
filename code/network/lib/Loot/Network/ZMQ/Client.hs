@@ -23,6 +23,7 @@ import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, lens, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
+import Data.Default (def)
 import qualified Data.List as L
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
@@ -108,13 +109,10 @@ heartbeatWorker cliEnv = do
 -- Internal requests
 ----------------------------------------------------------------------------
 
-data UpdatePeersReq = UpdatePeersReq
-    { uprAdd :: Set ZTNodeId
-    , uprDel :: Set ZTNodeId
-    } deriving (Show, Generic)
+type ZTUpdatePeersReq = UpdatePeersReq ZTNodeId
 
 data InternalRequest
-    = IRUpdatePeers UpdatePeersReq
+    = IRUpdatePeers ZTUpdatePeersReq
     | IRRegister ClientId (Set MsgType) (Set Subscription) ZTClientEnv
     | IRReconnect (Set ZTNodeId)
 
@@ -124,11 +122,11 @@ instance T.Show InternalRequest where
     show (IRReconnect nids)     = "IRReconnect" <> show nids
 
 applyUpdatePeers ::
-       Set ZTNodeId -> UpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
+       Set ZTNodeId -> ZTUpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
 applyUpdatePeers peers (UpdatePeersReq {..}) = do
-    let both = uprDel `Set.intersection` uprAdd
-    let add' = (uprAdd `Set.difference` both) `Set.difference` peers
-    let del' = (uprDel `Set.difference` both) `Set.intersection` peers
+    let both = _uprDel `Set.intersection` _uprAdd
+    let add' = (_uprAdd `Set.difference` both) `Set.difference` peers
+    let del' = (_uprDel `Set.difference` both) `Set.intersection` peers
     (add',del')
 
 newtype CliRequestQueue = CliRequestQueue { unCliRequestQueue :: TQueue InternalRequest }
@@ -194,10 +192,10 @@ createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
 
     let cliEnv = ZTNetCliEnv {..}
-    changePeers cliEnv $ UpdatePeersReq { uprAdd = peers, uprDel = mempty }
+    changePeers cliEnv $ def & uprAdd .~ peers
     pure cliEnv
 
-changePeers :: MonadIO m => ZTNetCliEnv -> UpdatePeersReq -> m ()
+changePeers :: MonadIO m => ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
 changePeers ZTNetCliEnv{..} req = liftIO $ do
     curTime <- getCurrentTimeMS
     (toConnect,toDisconnect) <- atomically $ do
@@ -397,9 +395,8 @@ registerClient clientId msgTs subs = do
 -- | Updates peers.
 updatePeers ::
        (MonadReader r m, HasLens' r CliRequestQueue, MonadIO m)
-    => Set ZTNodeId
-    -> Set ZTNodeId
+    => ZTUpdatePeersReq
     -> m ()
-updatePeers toAdd toDel = do
+updatePeers req = do
     cliRequestQueue <- unCliRequestQueue <$> view (lensOf @CliRequestQueue)
-    atomically $ TQ.writeTQueue cliRequestQueue $ IRUpdatePeers (UpdatePeersReq toAdd toDel)
+    atomically $ TQ.writeTQueue cliRequestQueue $ IRUpdatePeers req

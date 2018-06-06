@@ -48,7 +48,7 @@ newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue Inter
 ----------------------------------------------------------------------------
 
 -- | Client id, as seen from the server side.
-data ZTCliId = ZTCliId { unZtCliId :: ByteString }
+newtype ZTCliId = ZTCliId { unZtCliId :: ByteString } deriving (Eq,Ord,Show,Generic)
 
 type ZTServSendMsg = ServSendMsg ZTCliId
 

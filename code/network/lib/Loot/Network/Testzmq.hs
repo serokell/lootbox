@@ -6,6 +6,7 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async.Lifted as A
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Lens (makeLenses)
+import Data.Default (def)
 import qualified Data.Set as Set
 
 import Loot.Network.Class
@@ -95,7 +96,7 @@ testZmq = do
                     liftIO $ threadDelay 50000
             let client = do
                     biQ <- registerClient @ZmqTcp "pinger" (Set.fromList ["pong"]) mempty
-                    updatePeers @ZmqTcp (Set.singleton n1) mempty
+                    updatePeers @ZmqTcp $ def & uprAdd .~ (Set.singleton n1)
                     void $ A.concurrently (runPinger biQ) (runClient @ZmqTcp)
             liftIO $ threadDelay 200000
             putTextLn "starting client"

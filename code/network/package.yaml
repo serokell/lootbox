@@ -9,6 +9,7 @@ library:
     - async
     - bytestring
     - containers
+    - data-default
     - dependent-map
     - dependent-sum
     - lens

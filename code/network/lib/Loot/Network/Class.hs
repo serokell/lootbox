@@ -113,11 +113,16 @@ module Loot.Network.Class
     ( Content
     , Subscription
     , MsgType
+    , BiTQueue(..)
+
     , CliRecvMsg(..)
     , ClientId
-    , BiTQueue(..)
     , ClientEnv
+    , UpdatePeersReq(..)
+    , uprAdd
+    , uprDel
     , NetworkingCli(..)
+
     , ListenerId
     , ListenerEnv
     , ServSendMsg(..)
@@ -125,9 +130,11 @@ module Loot.Network.Class
     ) where
 
 import Control.Concurrent.STM.TQueue (TQueue)
+import Control.Lens (makeLenses)
+import Data.Default (Default (..))
 
 ----------------------------------------------------------------------------
--- Classes
+-- Common
 ----------------------------------------------------------------------------
 
 -- | We send and receive lists of strict bytestring. ZMQ
@@ -143,20 +150,36 @@ type Subscription = ByteString
 -- | Message type is characterized as a bytestring.
 type MsgType = ByteString
 
+-- | Two-ended queue, first parameter is messages user receives,
+-- second -- messages user sends.
 data BiTQueue r s = BiTQueue
     { bReceiveQ :: TQueue r
-      -- ^ Queue to receive messages.
+      -- ^ Queue to receive messages from.
     , bSendQ    :: TQueue s
-      -- ^ Queue to send messages.
+      -- ^ Queue to send messages to.
     }
 
 ----------------------------------------------------------------------------
 -- Client
 ----------------------------------------------------------------------------
 
+-- | Request to update peers
+data UpdatePeersReq nId = UpdatePeersReq
+    { _uprAdd :: Set nId -- ^ Peers to add/connect.
+    , _uprDel :: Set nId -- ^ Peers to delete/disconnect.
+    } deriving (Show, Generic)
+
+makeLenses ''UpdatePeersReq
+
+instance (Ord s) => Default (UpdatePeersReq s) where
+    def = UpdatePeersReq mempty mempty
+
 -- | Either a response from some server or a subscription update (key
 -- and data).
-data CliRecvMsg = Response MsgType Content | Update Subscription Content deriving (Eq,Ord,Show)
+data CliRecvMsg
+    = Response MsgType Content
+    | Update Subscription Content
+    deriving (Eq,Ord,Show)
 
 -- | Client worker environment.
 type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, Content))
@@ -164,7 +187,8 @@ type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, 
 -- | Client worker identifier.
 type ClientId = ByteString
 
-class NetworkingCli t m where
+-- | Client-side networking interface.
+class (Monad m, Ord (NodeId t)) => NetworkingCli t m where
     -- | Full-size identities -- ports/hosts. Something we can connect to.
     type NodeId t
 
@@ -176,7 +200,7 @@ class NetworkingCli t m where
     getPeers :: m (Set (NodeId t))
 
     -- | First arguments -- peers to connect to, second -- to disconnect.
-    updatePeers :: Set (NodeId t) -> Set (NodeId t) -> m ()
+    updatePeers :: UpdatePeersReq (NodeId t) -> m ()
 
     -- | Register client worker. Client identifier, msgtype set should
     -- be unique for a client (to implement proper
@@ -190,7 +214,10 @@ class NetworkingCli t m where
 
 -- | Things server sends -- either replies (to the requested node) or
 -- publishing content.
-data ServSendMsg cliId = Reply cliId MsgType Content | Publish Subscription Content deriving (Eq,Ord,Show)
+data ServSendMsg cliId
+    = Reply cliId MsgType Content
+    | Publish Subscription Content
+    deriving (Eq,Ord,Show)
 
 -- | Listener environment.
 type ListenerEnv t = BiTQueue (CliId t, MsgType, Content) (ServSendMsg (CliId t))
@@ -198,7 +225,8 @@ type ListenerEnv t = BiTQueue (CliId t, MsgType, Content) (ServSendMsg (CliId t)
 -- | Listener identifier.
 type ListenerId = ByteString
 
-class NetworkingServ t m where
+-- | Client-side networking interface.
+class (Monad m, Ord (CliId t)) => NetworkingServ t m where
     -- | Client identifier as seen from the server part. Clients do
     -- not have publicly recognized ids unlike servers, so it may be
     -- any bytestring.
