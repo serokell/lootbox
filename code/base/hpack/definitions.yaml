@@ -57,6 +57,14 @@ _definitions:
           - -rtsopts
           - -with-rtsopts=-N
 
+    - &bench-common
+        source-dirs: bench
+
+        ghc-options:
+          - -threaded
+
     - &exec-common
         ghc-options:
           - -threaded
+
+

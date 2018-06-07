@@ -32,5 +32,24 @@ tests:
     <<: *test-common
 
     dependencies:
+      - async
+      - hedgehog
+      - loot-network
+      - stm
       - tasty
       - tasty-discover
+      - tasty-hedgehog
+      - zeromq4-haskell
+
+
+benchmarks:
+  loot-net-bench:
+    <<: *bench-common
+
+    main: Bench.hs
+
+    dependencies:
+      - async
+      - loot-network
+      - stm
+      - zeromq4-haskell
