@@ -76,7 +76,6 @@ updateHeartbeat states nodeId = do
         modAction (Just hbs) = Just $ hbs & hbLiveness .~ hbLivenessMax
                                           & hbInterval .~ hbIntervalMin
     atomically $ modifyTVar states $ at nodeId %~ modAction
-    putTextLn "updHeartbeat"
 
 heartbeatWorker :: ZTNetCliEnv -> IO ()
 heartbeatWorker cliEnv = do
@@ -219,7 +218,7 @@ changePeers ZTNetCliEnv{..} req = liftIO $ do
 
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
-    putTextLn $ "Reconnecting: " <> show nIds
+    putTextLn $ "Reconnecting peers: " <> show nIds
 
     forM_ nIds $ \nId -> do
         Z.disconnect ztCliBack (ztNodeIdRouter nId)
