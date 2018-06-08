@@ -27,6 +27,8 @@ import Loot.Log.Warper (LoggerConfig)
 --     1. Server hostname of type 'String'
 --
 --     2. Server port of type 'Word16'
+--
+-- 3. Logger config
 type Options =
     '[ "timeout" ::: Int
      , "server"  ::<
