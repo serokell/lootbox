@@ -54,7 +54,8 @@ log x = do
 
 runZMQ :: ZTNodeId -> Env () -> Env () -> IO ()
 runZMQ nId server client = do
-    withZTGlobalEnv $ \ztEnv -> do
+    let logFoo l t = putTextLn $ "[" <> show l <> "]: " <> t
+    withZTGlobalEnv logFoo $ \ztEnv -> do
         cliEnv <- createNetCliEnv ztEnv mempty
         servEnv <- createNetServEnv ztEnv nId
         flip runReaderT (BigState cliEnv servEnv ztEnv) $ do

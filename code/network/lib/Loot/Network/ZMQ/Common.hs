@@ -6,6 +6,7 @@ module Loot.Network.ZMQ.Common
     ( ZmqTcp
     , ZTGlobalEnv(..)
     , ztContext
+    , ztLog
     , withZTGlobalEnv
     , endpointTcp
     , ZTNodeId(..)
@@ -24,6 +25,7 @@ import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
+import Loot.Log (Level)
 import Loot.Network.Class (Subscription (..))
 
 
@@ -33,14 +35,20 @@ data ZmqTcp
 -- | Global environment needed for client/server initialisation.
 data ZTGlobalEnv = ZTGlobalEnv
     { _ztContext :: Z.Context
+    , _ztLog     :: Level -> Text -> IO ()
     }
 
 makeLenses ''ZTGlobalEnv
 
 -- | Bracket for ZmqTcp global environment.
-withZTGlobalEnv :: (MonadMask m, MonadIO m) => (ZTGlobalEnv -> m a) -> m a
-withZTGlobalEnv action =
-    bracket (liftIO Z.context) (liftIO . Z.term) $ action . ZTGlobalEnv
+withZTGlobalEnv ::
+       (MonadMask m, MonadIO m)
+    => (Level -> Text -> IO ())
+    -> (ZTGlobalEnv -> m a)
+    -> m a
+withZTGlobalEnv logFunc action =
+    bracket (liftIO Z.context) (liftIO . Z.term) $
+    \ctx -> action $ ZTGlobalEnv ctx logFunc
 
 -- | Generic tcp address creation helper.
 endpointTcp :: String -> Integer -> String

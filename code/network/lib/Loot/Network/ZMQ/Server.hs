@@ -26,6 +26,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
+import Loot.Log (Level (..))
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
@@ -73,6 +74,9 @@ data ZTNetServEnv = ZTNetServEnv
 
     , ztServRequestQueue :: ServRequestQueue
       -- ^ Request queue for server.
+
+    , ztServLog          :: Level -> Text -> IO ()
+      -- ^ Logging function from global context.
     }
 
 instance HasLens ZTNetServEnv r ZTNetServEnv =>
@@ -82,7 +86,7 @@ instance HasLens ZTNetServEnv r ZTNetServEnv =>
         (lens ztServRequestQueue (\ztce rq2 -> ztce {ztServRequestQueue = rq2}))
 
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
-createNetServEnv (ZTGlobalEnv ctx) ztOurNodeId = liftIO $ do
+createNetServEnv (ZTGlobalEnv ctx ztServLog) ztOurNodeId = liftIO $ do
     ztServFront <- Z.socket ctx Z.Router
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
     Z.bind ztServFront (ztNodeIdRouter ztOurNodeId)
@@ -137,11 +141,11 @@ runBroker = do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
                 case ztEnv of
-                  Nothing  -> putText "frontToListener: can't resolve msgT"
+                  Nothing  -> ztServLog Warning "frontToListener: can't resolve msgT"
                   Just biQ ->
                       atomically $ TQ.writeTQueue (bReceiveQ biQ)
                                                   (ZTCliId cId, MsgType msgT, msg)
-            _ -> putText "frontToListener: wrong format"
+            _ -> ztServLog Warning "frontToListener: wrong format"
 
     let hbWorker = forever $ do
             let heartbeatInterval = 300000 -- 300 ms

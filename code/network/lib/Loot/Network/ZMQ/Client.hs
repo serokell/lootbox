@@ -34,6 +34,7 @@ import qualified Text.Show as T
 
 import qualified System.ZMQ4 as Z
 
+import Loot.Log (Level (..))
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
@@ -164,6 +165,9 @@ data ZTNetCliEnv = ZTNetCliEnv
     , ztCliRequestQueue :: CliRequestQueue
       -- ^ Queue to read (internal, administrative) client requests
       -- from, like updating peers or resetting connection.
+
+    , ztCliLog          :: Level -> Text -> IO ()
+      -- ^ Logging function from global context.
     }
 
 instance HasLens ZTNetCliEnv r ZTNetCliEnv =>
@@ -173,7 +177,7 @@ instance HasLens ZTNetCliEnv r ZTNetCliEnv =>
         (lens ztCliRequestQueue (\ztce rq2 -> ztce {ztCliRequestQueue = rq2}))
 
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
-createNetCliEnv (ZTGlobalEnv ctx) peers = liftIO $ do
+createNetCliEnv (ZTGlobalEnv ctx ztCliLog) peers = liftIO $ do
     -- I guess it's alright to connect ROUTER instead of binding it.
     -- https://stackoverflow.com/questions/16109139/zmq-when-to-use-zmq-bind-or-zmq-connect
     ztCliBack <- Z.socket ctx Z.Router
@@ -218,7 +222,7 @@ changePeers ZTNetCliEnv{..} req = liftIO $ do
 
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
-    putTextLn $ "Reconnecting peers: " <> show nIds
+    ztCliLog Info $ "Reconnecting peers: " <> show nIds
 
     forM_ nIds $ \nId -> do
         Z.disconnect ztCliBack (ztNodeIdRouter nId)
@@ -270,7 +274,7 @@ runBroker = do
                 let toWrite = bReceiveQ <$> Map.lookup clientId cMap
                 whenJust toWrite $ \tq -> TQ.writeTQueue tq (nId,content)
                 pure $ isJust toWrite
-            unless res $ putText $ "sendToClient: cId doesn't exist: " <> show clientId
+            unless res $ ztCliLog Warning $ "sendToClient: cId doesn't exist: " <> show clientId
 
     let onHeartbeat addr = liftIO $ updateHeartbeat ztHeartbeatInfo addr
 
@@ -310,23 +314,22 @@ runBroker = do
 
     let backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
-                Nothing -> putText $ "client btc: couldn't resolve peer: " <> show addr
+                Nothing -> ztCliLog Warning $ "client btc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
-                    --putTextLn $ "client btc: " <> show msgT
                     onHeartbeat nodeId
                     clientIdM <-
                         atomically $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
-                    maybe (putText "client btc: couldn't find client with this message type")
+                    maybe (ztCliLog Warning $ "client btc: couldn't find client " <>
+                                              "with this message type")
                           (\clientId -> sendToClient clientId (nodeId, Response (MsgType msgT) msg))
                           clientIdM
-            other -> putText $ "client btc: wrong format: " <> show other
+            other -> ztCliLog Warning $ "client btc: wrong format: " <> show other
 
     let subToClients = \case
             (k:addr:content) -> resolvePeer addr >>= \case
-                Nothing -> putText $ "Client stc: couldn't resolve peer: " <> show addr
+                Nothing -> ztCliLog Warning $ "Client stc: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
                     let k' = Subscription k
-                    --putTextLn $ "client stc: " <> show (k,content)
                     onHeartbeat nodeId
                     unless (k' == heartbeatSubscription) $ do
                         cids <-
@@ -342,7 +345,7 @@ runBroker = do
                             -- client needs).
                             error $ "Client stc: Nobody got the subscription " <>
                                     "message for key " <> show k
-            other -> putText $ "Client stc: wrong format: " <> show other
+            other -> ztCliLog Warning $ "Client stc: wrong format: " <> show other
 
     hbWorker <- liftIO $ A.async $ heartbeatWorker cEnv
     (_, backStmTry, backDestroy) <- socketWaitReadSTMLong ztCliBack
@@ -363,7 +366,6 @@ runBroker = do
                 atLeastOne $ NE.fromList $ [ readReq
                                            , boolToMaybe CBBack <$> backStmTry
                                            , boolToMaybe CBSub <$> subStmTry ] ++ readClient
-            --putTextLn $ "client main thread: " <> show results
             forM_ results $ \case
                 CBRequest r             -> processReq r
                 CBClient _cId nIdM cont -> clientToBackend nIdM cont
