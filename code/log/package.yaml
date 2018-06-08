@@ -1,0 +1,32 @@
+<<: !include "../base/hpack/lib.yaml"
+
+name: loot-log
+
+library:
+  <<: *lib-common
+
+  dependencies:
+    - aeson
+    - caps
+    - dlist
+    - fmt
+    - log-warper
+    - mtl
+    - text
+
+tests:
+  loot-base-test:
+    <<: *test-common
+
+    dependencies:
+      - loot-log
+
+      - hedgehog
+      - tasty
+      - tasty-discover
+      - tasty-hedgehog
+      - tasty-hunit
+
+      - caps
+      - fmt
+      - text

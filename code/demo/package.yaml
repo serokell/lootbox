@@ -8,6 +8,7 @@ library:
 
     - loot-config
     - loot-prelude
+    - loot-log
 
 executables:
   loot-demo:
@@ -16,10 +17,14 @@ executables:
 
     dependencies:
       - base-noprelude
+      - loot-demo
+      - loot-log
 
       - loot-demo
       - loot-prelude
 
+      - caps
+      - fmt
       - loot-config
       - yaml
 

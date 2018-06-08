@@ -1,3 +1,9 @@
 server:
   host: lootbox.serokell.io
   port: 1007
+
+logging:
+  loggerTree:
+    main:
+      Main:
+        severity: Debug+
