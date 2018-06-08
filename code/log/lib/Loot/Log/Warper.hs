@@ -40,11 +40,11 @@ withLogWarper logCfg cont = do
 
 -- | Map @loot-log@ severity level to @log-warper@ severity.
 mapLevel :: Level -> LW.Severity
-mapLevel Debug    = LW.Debug
-mapLevel Info     = LW.Info
-mapLevel Warning  = LW.Warning
-mapLevel Error    = LW.Error
-mapLevel Critical = LW.Error
+mapLevel Debug   = LW.Debug
+mapLevel Info    = LW.Info
+mapLevel Notice  = LW.Notice
+mapLevel Warning = LW.Warning
+mapLevel Error   = LW.Error
 
 -- | Reasonable defaults for 'LoggerConfig'.
 defaultLogCfg :: LW.LoggerConfig

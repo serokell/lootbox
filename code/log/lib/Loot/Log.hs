@@ -12,9 +12,9 @@ module Loot.Log
 
        , logDebug
        , logInfo
+       , logNotice
        , logWarning
        , logError
-       , logCritical
        ) where
 
 import Loot.Log.Internal

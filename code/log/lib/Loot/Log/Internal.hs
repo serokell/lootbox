@@ -19,9 +19,9 @@ module Loot.Log.Internal
 
        , logDebug
        , logInfo
+       , logNotice
        , logWarning
        , logError
-       , logCritical
        ) where
 
 import Prelude hiding (log, toList)
@@ -49,13 +49,13 @@ instance FromBuilder LogEvent where
     fromBuilder = LogEvent . fromBuilder
 
 
--- | Logging level (severity, priority, ...).
+-- | Logging level.
 data Level
-    = Debug
-    | Info
-    | Warning
-    | Error
-    | Critical
+    = Debug     -- ^ Things nobody should see unless it's explicitly stated.
+    | Info      -- ^ Regular information for user.
+    | Notice    -- ^ Something that should be more noticable than 'Info'.
+    | Warning   -- ^ Suspicious warning conditions.
+    | Error     -- ^ Errors.
     deriving (Eq, Generic, Show)
 
 
@@ -111,18 +111,17 @@ data Logging m = Logging
     }
 makeCap ''Logging
 
-
 logDebug :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
 logDebug = log Debug (nameFromStack callStack) . getLogEvent
 
 logInfo :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
 logInfo = log Info (nameFromStack callStack) . getLogEvent
 
+logNotice :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
+logNotice = log Notice (nameFromStack callStack) . getLogEvent
+
 logWarning :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
 logWarning = log Warning (nameFromStack callStack) . getLogEvent
 
 logError :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
 logError = log Error (nameFromStack callStack) . getLogEvent
-
-logCritical :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logCritical = log Critical (nameFromStack callStack) . getLogEvent

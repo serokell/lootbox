@@ -15,7 +15,7 @@ import Monad.Capabilities (emptyCaps)
 
 import Loot.Config (finalise, option, sub)
 import Loot.Demo.Config (ConfigPart, defaultConfig)
-import Loot.Log (logCritical, logDebug, logInfo)
+import Loot.Log (logDebug, logError, logInfo)
 import Loot.Log.Warper (withLogWarper)
 
 
@@ -31,7 +31,7 @@ main = usingReaderT emptyCaps $ do
             -- Config could not be loaded, so we initialise default logging
             -- configuration, because it is better than nothing.
             withLogWarper mempty $ do
-                logCritical $ "Missing mandatory options: "+|listF os|+""
+                logError $ "Missing mandatory options: "+|listF os|+""
                 exitFailure
         Right cfg -> do
             withLogWarper (cfg ^. option #logging) $ do
