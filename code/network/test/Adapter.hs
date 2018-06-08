@@ -11,8 +11,8 @@ import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, putTMVar, takeTMVar, tryReadTMVar)
 import Control.Concurrent.STM.TVar (modifyTVar, readTVar)
 import Data.List.NonEmpty as NE
-
 import Hedgehog
+import Test.Hspec
 
 import Loot.Network.ZMQ.Adapter
 
@@ -40,13 +40,14 @@ _testAtLeastOne = do
         wait
         atomically $ readTVar resVar
 
-hprop_testAtLeastOne :: Property
-hprop_testAtLeastOne = withTests 0 $ property $ do
-    res <- liftIO _testAtLeastOne
-    res === [ V1 :| [V2,V3,V4]
-            , V1 :| [V3]
-            , V2 :| [V4]
-            ]
+spec_testAtLeastOne :: Spec
+spec_testAtLeastOne = describe "adapter" $ do
+    res <- runIO _testAtLeastOne
+    it "should return expected result" $
+        res `shouldBe` [ V1 :| [V2,V3,V4]
+                       , V1 :| [V3]
+                       , V2 :| [V4]
+                       ]
 
 -- Bug! It should work 10ms, not 1s. Still repeats 100 times, no
 -- matter what I set.

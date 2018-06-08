@@ -34,11 +34,13 @@ tests:
     dependencies:
       - async
       - hedgehog
+      - hspec
       - loot-network
       - stm
       - tasty
       - tasty-discover
       - tasty-hedgehog
+      - tasty-hspec
       - zeromq4-haskell
 
 
@@ -48,8 +50,4 @@ benchmarks:
 
     main: Bench.hs
 
-    dependencies:
-      - async
-      - loot-network
-      - stm
-      - zeromq4-haskell
+    dependencies: []

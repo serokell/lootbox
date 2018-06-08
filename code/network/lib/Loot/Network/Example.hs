@@ -45,7 +45,10 @@ type Env a = ReaderT BigState IO a
 -- Runners
 ----------------------------------------------------------------------------
 
+lMVar :: MVar ()
 lMVar = unsafePerformIO $ newMVar ()
+
+log :: MonadIO m => Text -> m ()
 log x = do
     liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
 
@@ -67,7 +70,7 @@ testZmq = do
                         (cId, msgT, content) <- TQ.readTQueue (bReceiveQ biQ)
                         when (msgT == "ping" && content == [""]) $
                             TQ.writeTQueue (bSendQ biQ) (Reply cId "pong" [""])
-            let runPublisher biQ = forM_ [1..] $ \i -> do
+            let runPublisher biQ = forM_ [(1::Int)..] $ \i -> do
                     liftIO $ threadDelay 2000000
                     atomically $ TQ.writeTQueue
                         (bSendQ biQ)
