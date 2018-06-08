@@ -38,7 +38,7 @@ import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (HasLens (..), HasLens', whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
-                                ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
+                                ztNodeConnectionIdUnsafe, ztNodeIdPub, ztNodeIdRouter)
 
 ----------------------------------------------------------------------------
 -- Heartbeats
@@ -262,7 +262,7 @@ runBroker = do
 
     let resolvePeer :: MonadIO m => ByteString -> m (Maybe ZTNodeId)
         resolvePeer nodeid = do
-            atomically $ find ((== nodeid) . ztNodeConnectionId) <$> readTVar ztPeers
+            atomically $ find ((== nodeid) . ztNodeConnectionIdUnsafe) <$> readTVar ztPeers
 
     let sendToClient clientId (nId :: ZTNodeId, content :: CliRecvMsg) = do
             res <- atomically $ do
@@ -305,7 +305,7 @@ runBroker = do
                     Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
-            nodeId <- ztNodeConnectionId <$> maybe choosePeer pure nodeIdM
+            nodeId <- ztNodeConnectionIdUnsafe <$> maybe choosePeer pure nodeIdM
             Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", unMsgType msgT] ++ msg
 
     let backendToClients = \case

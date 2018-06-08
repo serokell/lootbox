@@ -12,6 +12,7 @@ module Loot.Network.ZMQ.Common
     , ztNodeIdRouter
     , ztNodeIdPub
     , ztNodeConnectionId
+    , ztNodeConnectionIdUnsafe
     , heartbeatSubscription
     ) where
 
@@ -36,6 +37,7 @@ data ZTGlobalEnv = ZTGlobalEnv
 
 makeLenses ''ZTGlobalEnv
 
+-- | Bracket for ZmqTcp global environment.
 withZTGlobalEnv :: (MonadMask m, MonadIO m) => (ZTGlobalEnv -> m a) -> m a
 withZTGlobalEnv action =
     bracket (liftIO Z.context) (liftIO . Z.term) $ action . ZTGlobalEnv
@@ -67,13 +69,19 @@ ztNodeIdPub ZTNodeId{..} = endpointTcp ztIdHost ztIdPubPort
 -- function errors if it's not possible to create a valid id from the
 -- given ZTNodeId. You can wrap it again using 'Z.restrict'.
 ztNodeConnectionId :: ZTNodeId -> ByteString
-ztNodeConnectionId ZTNodeId{..} =
+ztNodeConnectionId zId = -- ZTNodeId{..} =
+    let sid = ztNodeConnectionIdUnsafe zId
+    in Z.rvalue $
+       fromMaybe (error $ "ztNodeConnectionId: restriction check failed " <> show sid) $
+       (Z.toRestricted sid :: Maybe (Z.Restricted (Z.N1, Z.N254) ByteString))
+
+-- | Unsafe variant of 'ztNodeConnectionId' which doesn't check
+-- whether string is empty or too long.
+ztNodeConnectionIdUnsafe :: ZTNodeId -> ByteString
+ztNodeConnectionIdUnsafe ZTNodeId{..} =
     -- Yes, we use host:frontendPort, it doesn't seem to have
     -- any downsides.
-    let sid = endpointTcp ztIdHost ztIdRouterPort
-    in Z.rvalue $
-       fromMaybe (error $ "ztNodeConnectionId: restriction check failed " <> fromString sid) $
-       (Z.toRestricted (BS8.pack sid) :: Maybe (Z.Restricted (Z.N1, Z.N254) ByteString))
+    BS8.pack $ endpointTcp ztIdHost ztIdRouterPort
 
 -- | Key for heartbeat subscription.
 heartbeatSubscription :: Subscription

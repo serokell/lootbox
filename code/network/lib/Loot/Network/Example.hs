@@ -1,6 +1,6 @@
 -- | Playground example of how to use the framework.
 
-module Loot.Network.Testzmq (testZmq) where
+module Loot.Network.Example (testZmq) where
 
 import Prelude hiding (log)
 
