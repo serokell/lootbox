@@ -35,30 +35,16 @@ Client:
 Tasklist
 ========
 
-Done:
-  * Subscriptions
-  * Client-worker by tag/type (Router on server back instead of Dealer)
-  * Choose node when sending a message from client (Router, not Dealer)
-  * Client-side message routing (msgType-based).
-  * Heartbeating
-
-Basic features:
-  * TODO Exceptions! safe-exceptions/async. Replace all "error" with
-    something well-thought, like MonadThrow/Catch and Maybes/Eithers.
-  * Also logging?
-
-Then test all features and debug.
-
-Pro features:
-  * TODO Server side monitoring of incoming connections (for stats?).
-  * TODO Smart heartbeating? (different peers -- different frequency
-    that we should agree on beforehand
-  * TODO Discovery.
-  * TODO Application-level load balancing.
-  * TODO Smart broadcasting (client -> [set of peers] instead of PUB)
-  * TODO Message limits
-  * TODO Load balancing on client backend -- choosing peer to connect based
+Next:
+  * Discovery.
+  * Application-level load balancing.
+  * Message limits.
+  * Server side monitoring of incoming connections (for stats?).
+  * Load balancing on client backend -- choosing peer to connect based
     on its ping/average response speed/etc.
+  * Smart heartbeating? (different peers -- different frequency
+    that we should agree on beforehand.
+  * Smart broadcasting (client -> [set of peers] instead of PUB).
 -}
 
 module Loot.Network.ZMQ
