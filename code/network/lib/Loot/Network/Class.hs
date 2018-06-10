@@ -115,7 +115,9 @@ data CliRecvMsg
     | Update Subscription Content
     deriving (Eq,Ord,Show)
 
--- | Client worker environment.
+-- | Client worker environment. It receives 'CliRecvMsg' from a
+-- particular node. We send pair of content with its message type to
+-- some particular node, or just to some arbitrary one.
 type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, Content))
 
 -- | Client worker identifier.
@@ -153,7 +155,8 @@ data ServSendMsg cliId
     | Publish Subscription Content
     deriving (Eq,Ord,Show)
 
--- | Listener environment.
+-- | Listener environment. It sends 'ServSendMsg', receives content
+-- with its message type from some client id.
 type ListenerEnv t = BiTQueue (CliId t, MsgType, Content) (ServSendMsg (CliId t))
 
 -- | Listener identifier.
