@@ -19,11 +19,14 @@ _definitions:
 
     - &default-extensions
         - ApplicativeDo
+        - BangPatterns
         - DeriveGeneric
         - FlexibleContexts
         - FlexibleInstances
+        - FunctionalDependencies
         - GeneralizedNewtypeDeriving
         - LambdaCase
+        - MultiParamTypeClasses
         - NamedFieldPuns
         - OverloadedLabels
         - OverloadedStrings
@@ -54,6 +57,14 @@ _definitions:
           - -rtsopts
           - -with-rtsopts=-N
 
+    - &bench-common
+        source-dirs: bench
+
+        ghc-options:
+          - -threaded
+
     - &exec-common
         ghc-options:
           - -threaded
+
+

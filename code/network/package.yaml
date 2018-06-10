@@ -5,12 +5,50 @@ name: loot-network
 library:
   <<: *lib-common
 
-  dependencies: []
+  dependencies:
+    - async
+    - bytestring
+    - containers
+    - data-default
+    - dependent-map
+    - dependent-sum
+    - lens
+    - lifted-async
+    - loot-log
+    - mtl
+    - network
+    - serialise
+    - singletons
+    - stm
+    - random
+    - reflection
+    - tagged
+    - time
+    - text
+    - unordered-containers
+    - zeromq4-haskell
 
 tests:
   loot-base-test:
     <<: *test-common
 
     dependencies:
+      - async
+      - hedgehog
+      - hspec
+      - loot-network
+      - stm
       - tasty
       - tasty-discover
+      - tasty-hedgehog
+      - tasty-hspec
+      - zeromq4-haskell
+
+
+benchmarks:
+  loot-net-bench:
+    <<: *bench-common
+
+    main: Bench.hs
+
+    dependencies: []
