@@ -9,7 +9,9 @@ library:
     - aeson
     - caps
     - dlist
+    - ether
     - fmt
+    - lens
     - log-warper
     - mtl
     - text

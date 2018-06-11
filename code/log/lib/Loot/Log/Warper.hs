@@ -3,7 +3,8 @@
 
 -- | @log-warper@ backend implementation.
 module Loot.Log.Warper
-       ( withLogWarper
+       ( prepareLogWarper
+       , withLogWarper
        , LW.LoggerConfig
        ) where
 
@@ -12,25 +13,34 @@ import Data.Aeson (encode)
 import Fmt ((+|), (|+))
 import Monad.Capabilities (CapImpl (CapImpl), CapsT, HasNoCap, addCap)
 
-import Loot.Log.Internal (Level (..), Logging (..), logDebug)
+import Loot.Log.Internal (Level (..), Logging (..), hoistLogging, logDebug)
 
 import qualified System.Wlog as LW
 
+-- | Create 'Logging' using log-warper.
+-- Given config may be expanded - result of that is returned as well.
+prepareLogWarper
+    :: (MonadIO m, MonadIO n)
+    => LW.LoggerConfig -> m (LW.LoggerConfig, Logging n)
+prepareLogWarper logCfg = do
+    let finalCfg = logCfg <> defaultLogCfg
+    LW.setupLogging Nothing finalCfg
+    let logging = Logging
+            { _log = \lvl name text ->
+                let name' = show name
+                    lvl' = mapLevel lvl
+                in liftIO $ LW.dispatchMessage (LW.LoggerName name') lvl' text
+            }
+    return (finalCfg, logging)
 
 -- | Add 'Logging' capability.
 withLogWarper :: forall m caps a. (MonadIO m, HasNoCap Logging caps)
               => LW.LoggerConfig  -- ^ @log-warper@ configuration
               -> CapsT (Logging ': caps) m a -> CapsT caps m a
 withLogWarper logCfg cont = do
-    let finalCfg = logCfg <> defaultLogCfg
-    LW.setupLogging Nothing finalCfg
+    (finalCfg, logging) <- prepareLogWarper logCfg
     let loggingImpl :: CapImpl Logging '[] m
-        loggingImpl = CapImpl $ Logging
-            { _log = \lvl name text -> liftIO $
-                let name' = show name
-                    lvl' = mapLevel lvl
-                in LW.dispatchMessage (LW.LoggerName name') lvl' text
-            }
+        loggingImpl = CapImpl $ hoistLogging liftIO logging
     withReaderT (addCap loggingImpl) $ do
         logDebug "Logging started"
         let cfgText = decodeUtf8 (encode finalCfg) :: Text

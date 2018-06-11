@@ -15,7 +15,9 @@ module Loot.Log.Internal
        , pkgName
 
        , Logging (..)
+       , hoistLogging
        , MonadLogging (..)
+       , defaultLog
 
        , logDebug
        , logInfo
@@ -26,8 +28,10 @@ module Loot.Log.Internal
 
 import Prelude hiding (log, toList)
 
+import Control.Lens (views)
 import Data.DList (DList)
-import Fmt (Buildable (build), Builder, fmt, (+|), (|+))
+import Ether.Internal (HasLens (..))
+import Fmt (Buildable (build), fmt, (+|), (|+))
 import Fmt.Internal (FromBuilder (fromBuilder))
 import GHC.Exts (IsList (Item, fromList, toList), IsString (fromString))
 import GHC.Stack (CallStack, HasCallStack,
@@ -111,6 +115,16 @@ data Logging m = Logging
     }
 makeCap ''Logging
 
+-- | Default implementation of 'MonadLogging' (generated with 'makeCap')
+-- for 'ReaderT ctx IO' monad stack.
+defaultLog
+    :: forall m ctx.
+       (HasLens (Logging m) ctx (Logging m), MonadReader ctx m)
+    => Level -> Name -> Text -> m ()
+defaultLog l n t = do
+    lg <- views (lensOf @(Logging m)) _log
+    lg l n t
+
 logDebug :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
 logDebug = log Debug (nameFromStack callStack) . getLogEvent
 
@@ -125,3 +139,6 @@ logWarning = log Warning (nameFromStack callStack) . getLogEvent
 
 logError :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
 logError = log Error (nameFromStack callStack) . getLogEvent
+
+hoistLogging :: (forall a. m a -> n a) -> Logging m -> Logging n
+hoistLogging hst (Logging lg) = Logging $ \l n t -> hst (lg l n t)
