@@ -13,7 +13,7 @@ import Data.Aeson (encode)
 import Fmt ((+|), (|+))
 import Monad.Capabilities (CapImpl (CapImpl), CapsT, HasNoCap, addCap)
 
-import Loot.Log.Internal (Level (..), Logging (..), hoistLogging, logDebug)
+import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), hoistLogging, logDebug)
 
 import qualified System.Wlog as LW
 
@@ -21,8 +21,8 @@ import qualified System.Wlog as LW
 -- Given config may be expanded - result of that is returned as well.
 prepareLogWarper
     :: (MonadIO m, MonadIO n)
-    => LW.LoggerConfig -> m (LW.LoggerConfig, Logging n)
-prepareLogWarper logCfg = do
+    => LW.LoggerConfig -> NameSelector -> m (LW.LoggerConfig, Logging n)
+prepareLogWarper logCfg nameSel = do
     let finalCfg = logCfg <> defaultLogCfg
     LW.setupLogging Nothing finalCfg
     let logging = Logging
@@ -30,6 +30,7 @@ prepareLogWarper logCfg = do
                 let name' = show name
                     lvl' = mapLevel lvl
                 in liftIO $ LW.dispatchMessage (LW.LoggerName name') lvl' text
+            , _logName = pure nameSel
             }
     return (finalCfg, logging)
 
@@ -38,7 +39,7 @@ withLogWarper :: forall m caps a. (MonadIO m, HasNoCap Logging caps)
               => LW.LoggerConfig  -- ^ @log-warper@ configuration
               -> CapsT (Logging ': caps) m a -> CapsT caps m a
 withLogWarper logCfg cont = do
-    (finalCfg, logging) <- prepareLogWarper logCfg
+    (finalCfg, logging) <- prepareLogWarper logCfg CallstackName
     let loggingImpl :: CapImpl Logging '[] m
         loggingImpl = CapImpl $ hoistLogging liftIO logging
     withReaderT (addCap loggingImpl) $ do

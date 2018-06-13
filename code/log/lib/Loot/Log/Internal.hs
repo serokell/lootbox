@@ -14,10 +14,12 @@ module Loot.Log.Internal
        , nameFromStack
        , pkgName
 
+       , NameSelector (..)
        , Logging (..)
        , hoistLogging
        , MonadLogging (..)
        , defaultLog
+       , defaultLogName
 
        , logDebug
        , logInfo
@@ -44,7 +46,7 @@ import qualified Data.Text as T
 
 
 -- | An event that gets logged (in most cases just text).
-newtype LogEvent = LogEvent { getLogEvent :: Text }
+newtype LogEvent = LogEvent Text
 
 instance IsString LogEvent where
     fromString = LogEvent . fromString
@@ -108,14 +110,25 @@ pkgName full = extract . T.breakOnAll "-" . toText $ full
     extract ((n, _) : [_]) = n
     extract (_ : ns)       = extract ns
 
+-- | One may wish to use names derived from callstack
+-- or manually specified ones.
+data NameSelector
+    = CallstackName
+    | GivenName Name
+
+-- | Take a 'Name' according to 'NameSelector'.
+selectLogName :: HasCallStack => CallStack -> NameSelector -> Name
+selectLogName cs CallstackName = nameFromStack cs
+selectLogName _ (GivenName n)  = n
 
 -- | Logging capability.
 data Logging m = Logging
-    { _log :: Level -> Name -> Text -> m ()
+    { _log     :: Level -> Name -> Text -> m ()
+    , _logName :: m NameSelector
     }
 makeCap ''Logging
 
--- | Default implementation of 'MonadLogging' (generated with 'makeCap')
+-- | Default implementation of 'MonadLogging.log' (generated with 'makeCap')
 -- for 'ReaderT ctx IO' monad stack.
 defaultLog
     :: forall m ctx.
@@ -125,20 +138,36 @@ defaultLog l n t = do
     lg <- views (lensOf @(Logging m)) _log
     lg l n t
 
-logDebug :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logDebug = log Debug (nameFromStack callStack) . getLogEvent
+-- | Default implementation of 'MonadLogging.logName' (generated with 'makeCap')
+-- for 'ReaderT ctx IO' monad stack.
+defaultLogName
+    :: forall m ctx.
+       (HasLens NameSelector ctx NameSelector, MonadReader ctx m)
+    => m NameSelector
+defaultLogName = view (lensOf @NameSelector)
 
-logInfo :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logInfo = log Info (nameFromStack callStack) . getLogEvent
+logDebug :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logDebug (LogEvent ev) =
+    logName >>= \ns -> log Debug (selectLogName callStack ns) ev
 
-logNotice :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logNotice = log Notice (nameFromStack callStack) . getLogEvent
+logInfo :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logInfo (LogEvent ev) =
+    logName >>= \ns -> log Info (selectLogName callStack ns) ev
 
-logWarning :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logWarning = log Warning (nameFromStack callStack) . getLogEvent
+logNotice :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logNotice (LogEvent ev) =
+    logName >>= \ns -> log Notice (selectLogName callStack ns) ev
 
-logError :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logError = log Error (nameFromStack callStack) . getLogEvent
+logWarning :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logWarning (LogEvent ev) =
+    logName >>= \ns -> log Warning (selectLogName callStack ns) ev
+
+logError :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logError (LogEvent ev) =
+    logName >>= \ns -> log Error (selectLogName callStack ns) ev
 
 hoistLogging :: (forall a. m a -> n a) -> Logging m -> Logging n
-hoistLogging hst (Logging lg) = Logging $ \l n t -> hst (lg l n t)
+hoistLogging hst logging =
+    logging{ _log = \l n t -> hst (_log logging l n t)
+           , _logName = hst (_logName logging)
+           }
