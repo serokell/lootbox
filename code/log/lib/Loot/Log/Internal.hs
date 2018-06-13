@@ -46,7 +46,7 @@ import qualified Data.Text as T
 
 
 -- | An event that gets logged (in most cases just text).
-newtype LogEvent = LogEvent Text
+newtype LogEvent = LogEvent { getLogEvent :: Text }
 
 instance IsString LogEvent where
     fromString = LogEvent . fromString
@@ -146,25 +146,26 @@ defaultLogName
     => m NameSelector
 defaultLogName = view (lensOf @NameSelector)
 
+-- | Helper function for use 'logDebug' and family.
+logWith :: (Monad m, MonadLogging m) => Level -> CallStack -> LogEvent -> m ()
+logWith level cs ev = do
+    name <- selectLogName cs <$> logName
+    log level name (getLogEvent ev)
+
 logDebug :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
-logDebug (LogEvent ev) =
-    logName >>= \ns -> log Debug (selectLogName callStack ns) ev
+logDebug = logWith Debug callStack
 
 logInfo :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
-logInfo (LogEvent ev) =
-    logName >>= \ns -> log Info (selectLogName callStack ns) ev
+logInfo = logWith Info callStack
 
 logNotice :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
-logNotice (LogEvent ev) =
-    logName >>= \ns -> log Notice (selectLogName callStack ns) ev
+logNotice = logWith Notice callStack
 
 logWarning :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
-logWarning (LogEvent ev) =
-    logName >>= \ns -> log Warning (selectLogName callStack ns) ev
+logWarning = logWith Warning callStack
 
 logError :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
-logError (LogEvent ev) =
-    logName >>= \ns -> log Error (selectLogName callStack ns) ev
+logError = logWith Error callStack
 
 hoistLogging :: (forall a. m a -> n a) -> Logging m -> Logging n
 hoistLogging hst logging =
