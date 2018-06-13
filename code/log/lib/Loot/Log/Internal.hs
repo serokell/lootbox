@@ -18,8 +18,11 @@ module Loot.Log.Internal
        , Logging (..)
        , hoistLogging
        , MonadLogging (..)
+
        , defaultLog
        , defaultLogName
+       , logNameSelectorL
+       , logNameL
 
        , logDebug
        , logInfo
@@ -30,7 +33,7 @@ module Loot.Log.Internal
 
 import Prelude hiding (log, toList)
 
-import Control.Lens (views)
+import Control.Lens (Setter', makePrisms, sets, views)
 import Data.DList (DList)
 import Ether.Internal (HasLens (..))
 import Fmt (Buildable (build), fmt, (+|), (|+))
@@ -116,6 +119,8 @@ data NameSelector
     = CallstackName
     | GivenName Name
 
+makePrisms ''NameSelector
+
 -- | Take a 'Name' according to 'NameSelector'.
 selectLogName :: HasCallStack => CallStack -> NameSelector -> Name
 selectLogName cs CallstackName = nameFromStack cs
@@ -145,6 +150,12 @@ defaultLogName
        (HasLens NameSelector ctx NameSelector, MonadReader ctx m)
     => m NameSelector
 defaultLogName = view (lensOf @NameSelector)
+
+logNameSelectorL :: Functor m => Setter' (Logging m) NameSelector
+logNameSelectorL = sets $ \f l -> l{ _logName = fmap f (_logName l) }
+
+logNameL :: Functor m => Setter' (Logging m) Name
+logNameL = logNameSelectorL . _GivenName
 
 -- | Helper function for use 'logDebug' and family.
 logWith :: (Monad m, MonadLogging m) => Level -> CallStack -> LogEvent -> m ()
