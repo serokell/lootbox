@@ -15,6 +15,10 @@ module Loot.Log
        , logNotice
        , logWarning
        , logError
+
+       , HasLogName (..)
+       , WithLogging
+       , modifyLogName
        ) where
 
 import Loot.Log.Internal
