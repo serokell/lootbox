@@ -21,8 +21,6 @@ module Loot.Log.Internal
        , hoistLogging
        , MonadLogging (..)
 
-       , defaultLog
-       , defaultLogName
        , logNameSelL
 
        , logDebug
@@ -34,15 +32,12 @@ module Loot.Log.Internal
        , HasLogName (..)
        , WithLogging
        , modifyLogName
-       , defaultAskLogNameSel
-       , defaultModifyLogNameSel
        ) where
 
 import Prelude hiding (log, toList)
 
-import Control.Lens (Setter', makePrisms, sets, views)
+import Control.Lens (Setter', makePrisms, sets)
 import Data.DList (DList)
-import Ether.Internal (HasLens (..))
 import Fmt (Buildable (build), fmt, (+|), (|+))
 import Fmt.Internal (FromBuilder (fromBuilder))
 import GHC.Exts (IsList (Item, fromList, toList), IsString (fromString))
@@ -177,45 +172,6 @@ class Monad m => HasLogName m where
 
 type WithLogging m = (MonadLogging m, HasLogName m)
 
--- | If a manually provided name is used, change it.
+-- | If a manually provided name is used, changes it.
 modifyLogName :: HasLogName m => (Name -> Name) -> m a -> m a
 modifyLogName f = modifyLogNameSel (_GivenName %~ f)
-
----------------------------------------------------------------------
--- Helpers for @ReaderT ctx IO@ monad stack
----------------------------------------------------------------------
-
--- | Default implementation of 'MonadLogging.log' (generated with 'makeCap')
--- for 'ReaderT ctx IO' monad stack.
-defaultLog
-    :: forall m ctx.
-       (HasLens (Logging m) ctx (Logging m), MonadReader ctx m)
-    => Level -> Name -> Text -> m ()
-defaultLog l n t = do
-    lg <- views (lensOf @(Logging m)) _log
-    lg l n t
-
--- | Default implementation of 'MonadLogging.logName' (generated with 'makeCap')
--- for 'ReaderT ctx IO' monad stack.
-defaultLogName
-    :: forall m ctx.
-       (HasLens NameSelector ctx NameSelector, MonadReader ctx m)
-    => m NameSelector
-defaultLogName = view (lensOf @NameSelector)
-
--- | Default implementation of 'modifyLogNameSel' for 'ReaderT ctx IO' monad
--- stack.
-defaultModifyLogNameSel
-    :: forall m ctx a.
-       (HasLens (Logging m) ctx (Logging m), MonadReader ctx m)
-    => (NameSelector -> NameSelector) -> m a -> m a
-defaultModifyLogNameSel f =
-    local (lensOf @(Logging m) . logNameSelL %~ f)
-
--- | Default implementation of 'askLogNameSel' for 'ReaderT ctx IO' monad
--- stack.
-defaultAskLogNameSel
-    :: forall m ctx.
-       (HasLens (Logging m) ctx (Logging m), MonadReader ctx m)
-    => m NameSelector
-defaultAskLogNameSel = view (lensOf @(Logging m)) >>= _logName
