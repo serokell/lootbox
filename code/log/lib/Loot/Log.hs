@@ -10,6 +10,7 @@ module Loot.Log
        , MonadLogging
        , log
        , logName
+       , hoistLogging
 
        , logDebug
        , logInfo
