@@ -9,6 +9,7 @@ module Loot.Log
        , Logging (..)
        , MonadLogging
        , log
+       , logName
 
        , logDebug
        , logInfo
