@@ -4,7 +4,6 @@
 module Loot.Log.Rio
     ( defaultLog
     , defaultLogName
-    , defaultAskLogNameSel
     , defaultModifyLogNameSel
     ) where
 
@@ -26,9 +25,9 @@ defaultLog l n t = do
 -- 'makeCap').
 defaultLogName
     :: forall m ctx.
-       (HasLens NameSelector ctx NameSelector, MonadReader ctx m)
+       (HasLens (Logging m) ctx (Logging m), MonadReader ctx m)
     => m NameSelector
-defaultLogName = view (lensOf @NameSelector)
+defaultLogName = view (lensOf @(Logging m)) >>= _logName
 
 -- | Default implementation of 'modifyLogNameSel' stack.
 defaultModifyLogNameSel
@@ -37,10 +36,3 @@ defaultModifyLogNameSel
     => (NameSelector -> NameSelector) -> m a -> m a
 defaultModifyLogNameSel f =
     local (lensOf @(Logging m) . logNameSelL %~ f)
-
--- | Default implementation of 'askLogNameSel'.
-defaultAskLogNameSel
-    :: forall m ctx.
-       (HasLens (Logging m) ctx (Logging m), MonadReader ctx m)
-    => m NameSelector
-defaultAskLogNameSel = view (lensOf @(Logging m)) >>= _logName

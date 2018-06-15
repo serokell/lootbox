@@ -29,7 +29,7 @@ module Loot.Log.Internal
        , logWarning
        , logError
 
-       , HasLogName (..)
+       , ModifyLogName (..)
        , WithLogging
        , modifyLogName
        ) where
@@ -166,12 +166,11 @@ logError :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
 logError = logWith Error callStack
 
 -- | Allows to manipulate with logger name.
-class Monad m => HasLogName m where
+class Monad m => ModifyLogName m where
     modifyLogNameSel :: (NameSelector -> NameSelector) -> m a -> m a
-    askLogNameSel :: m NameSelector
 
-type WithLogging m = (MonadLogging m, HasLogName m)
+type WithLogging m = (MonadLogging m, ModifyLogName m)
 
 -- | If a manually provided name is used, changes it.
-modifyLogName :: HasLogName m => (Name -> Name) -> m a -> m a
+modifyLogName :: ModifyLogName m => (Name -> Name) -> m a -> m a
 modifyLogName f = modifyLogNameSel (_GivenName %~ f)

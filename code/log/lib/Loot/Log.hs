@@ -17,7 +17,7 @@ module Loot.Log
        , logWarning
        , logError
 
-       , HasLogName (..)
+       , ModifyLogName (..)
        , WithLogging
        , modifyLogName
        ) where
