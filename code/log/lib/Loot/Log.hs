@@ -5,6 +5,8 @@
 module Loot.Log
        ( Level (..)
        , Name
+       , NameSelector (..)
+       , _GivenName
 
        , Logging (..)
        , MonadLogging
