@@ -4,17 +4,24 @@
 
 module Loot.Network.ZMQ.Common
     ( ZmqTcp
+
     , ZTGlobalEnv(..)
     , ztContext
     , ztLog
+
+    , ztGlobalEnv
+    , ztGlobalEnvRelease
     , withZTGlobalEnv
+
     , endpointTcp
     , ZTNodeId(..)
     , parseZTNodeId
+
     , ztNodeIdRouter
     , ztNodeIdPub
     , ztNodeConnectionId
     , ztNodeConnectionIdUnsafe
+
     , heartbeatSubscription
     ) where
 
@@ -42,15 +49,24 @@ data ZTGlobalEnv = ZTGlobalEnv
 
 makeLenses ''ZTGlobalEnv
 
--- | Bracket for ZmqTcp global environment.
+-- | Acquire 'ZTGlobalEnv'.
+ztGlobalEnv :: MonadIO m => (Level -> Text -> IO ()) -> m ZTGlobalEnv
+ztGlobalEnv _ztLog = do
+    _ztContext <- liftIO Z.context
+    pure $ ZTGlobalEnv{..}
+
+-- | Release 'ZTGlobalEnv'.
+ztGlobalEnvRelease :: MonadIO m => ZTGlobalEnv -> m ()
+ztGlobalEnvRelease = liftIO . Z.term . _ztContext
+
+-- | Bracket for 'ZTGlobalEnv'
 withZTGlobalEnv ::
        (MonadMask m, MonadIO m)
     => (Level -> Text -> IO ())
     -> (ZTGlobalEnv -> m a)
     -> m a
 withZTGlobalEnv logFunc action =
-    bracket (liftIO Z.context) (liftIO . Z.term) $
-    \ctx -> action $ ZTGlobalEnv ctx logFunc
+    bracket (ztGlobalEnv logFunc) ztGlobalEnvRelease action
 
 -- | Generic tcp address creation helper.
 endpointTcp :: String -> Integer -> String
