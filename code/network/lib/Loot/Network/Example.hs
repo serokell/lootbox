@@ -8,13 +8,13 @@ import Prelude hiding (log)
 
 import Control.Concurrent (threadDelay, withMVar)
 import qualified Control.Concurrent.Async.Lifted as A
-import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Lens (makeLenses)
 import Data.Default (def)
 import qualified Data.Set as Set
 import System.IO.Unsafe (unsafePerformIO)
 
 import Loot.Base.HasLens (HasLens (..))
+import Loot.Network.BiTQueue (recvBtq, sendBtq)
 import Loot.Network.Class
 import Loot.Network.ZMQ
 import qualified Loot.Network.ZMQ.Instance as I
@@ -83,14 +83,13 @@ testZmq = do
     let node1 = do
             let runPonger biQ = forever $ do
                     atomically $ do
-                        (cId, msgT, content) <- TQ.readTQueue (bReceiveQ biQ)
+                        (cId, msgT, content) <- recvBtq biQ
                         when (msgT == "ping" && content == [""]) $
-                            TQ.writeTQueue (bSendQ biQ) (Reply cId "pong" [""])
+                            sendBtq biQ (Reply cId "pong" [""])
             let runPublisher biQ = forM_ [(1::Int)..] $ \i -> do
                     liftIO $ threadDelay 2000000
-                    atomically $ TQ.writeTQueue
-                        (bSendQ biQ)
-                        (Publish (Subscription "block") ["noblock: " <> show i])
+                    atomically $
+                        sendBtq biQ (Publish (Subscription "block") ["noblock: " <> show i])
             let servWithCancel = do
                     s1 <- A.async $ runServer @ZmqTcp
                     liftIO $ do
@@ -115,18 +114,18 @@ testZmq = do
 
                     liftIO $ threadDelay 1000000
                     log "pinger: sending"
-                    atomically $ TQ.writeTQueue (bSendQ biQ) (Just n1, ("ping",[""]))
+                    atomically $ sendBtq biQ (Just n1, ("ping",[""]))
                     liftIO $ threadDelay 50000
                     log "pinger: sent ping, waiting for reply"
                     doUnlessM $ do
-                        (nId,msg) <- atomically $ TQ.readTQueue (bReceiveQ biQ)
+                        (nId,msg) <- atomically $ recvBtq biQ
                         if nId == n1 && msg == Response "pong" [""]
                             then True <$ log "pinger: got correct response"
                             else False <$ log ("pinger: got something else, probably " <>
                                               "subscription: " <> show msg)
                     liftIO $ threadDelay 50000
             let runSubreader biQ = forever $ do
-                    x <- atomically $ TQ.readTQueue (bReceiveQ biQ)
+                    x <- atomically $ recvBtq biQ
                     log $ "subreader: got " <> show x
             let client = do
                     -- biq2 is also subscribed to blocks but will discard them, just to test

@@ -29,6 +29,7 @@ import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
 import Loot.Log (Level (..))
+import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
@@ -179,7 +180,8 @@ registerListener ::
 registerListener queue lName msgTypes = do
     let servRequestQueue = unServRequestQueue queue
     liftIO $ do
-        biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
+        biTQueue <- newBtq
 
         atomically $ TQ.writeTQueue servRequestQueue $ IRRegister lName msgTypes biTQueue
+
         pure biTQueue

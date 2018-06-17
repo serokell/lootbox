@@ -63,9 +63,10 @@ module Loot.Network.Class
     , NetworkingServ (..)
     ) where
 
-import Control.Concurrent.STM.TQueue (TQueue)
 import Control.Lens (makeLenses)
 import Data.Default (Default (..))
+
+import Loot.Network.BiTQueue (BiTQueue (..))
 
 ----------------------------------------------------------------------------
 -- Common
@@ -83,15 +84,6 @@ newtype Subscription = Subscription { unSubscription :: ByteString } deriving (E
 
 -- | Message type is characterized as a bytestring.
 newtype MsgType = MsgType { unMsgType :: ByteString } deriving (Eq,Ord,Show,IsString)
-
--- | Two-ended queue, first parameter is messages user receives,
--- second -- messages user sends.
-data BiTQueue r s = BiTQueue
-    { bReceiveQ :: TQueue r
-      -- ^ Queue to receive messages from.
-    , bSendQ    :: TQueue s
-      -- ^ Queue to send messages to.
-    }
 
 ----------------------------------------------------------------------------
 -- Client
