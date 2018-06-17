@@ -38,6 +38,7 @@ tests:
       - hedgehog
       - hspec
       - loot-network
+      - serialise
       - stm
       - tasty
       - tasty-discover

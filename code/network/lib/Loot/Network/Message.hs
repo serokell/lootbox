@@ -27,6 +27,7 @@ import Data.Singletons.TypeLits hiding (natVal)
 import Data.Tagged (Tagged (..))
 import Data.Type.Equality (testEquality)
 
+-- todo require typeable?
 -- | Message is a type that has unique message type (expressed by
 -- 'Nat' type family instance).
 class (KnownNat (MsgTag d), Serialise d) => Message d where
@@ -91,33 +92,3 @@ runCallbacks cbs sn bs =
 runCallbacksInt :: [CallbackWrapper m a] -> Integer -> ByteString -> m a
 runCallbacksInt cbs i bs =
     reifyNat i $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs
-
-----------------------------------------------------------------------------
--- Testing
-----------------------------------------------------------------------------
-
-data Msg1 = Msg1 String
-data Msg2 = Msg2 Integer
-data Msg3 = Msg3 Double
-
-instance Serialise Msg1 where
-    encode = error "test"
-    decode = pure $ Msg1 "wow,parsed)))"
-instance Serialise Msg2 where
-    encode = error "test"
-    decode = pure $ Msg2 10
-instance Serialise Msg3 where
-    encode = error "test"
-    decode = pure $ Msg3 1.2345
-
-instance Message Msg1 where type MsgTag Msg1 = 1
-instance Message Msg2 where type MsgTag Msg2 = 2
--- it's an error if you put "2" here, thanks to injective type families
-instance Message Msg3 where type MsgTag Msg3 = 3
-
-_test :: IO ()
-_test = do
-    let create foo = handlerDecoded $ either (const $ putText "can't parse") foo
-    let r1 = create $ \(Msg1 s) -> putStrLn s
-    let r2 = create $ \(Msg2 i) -> putText "wat?" >> print (i + 1)
-    runCallbacksInt [r1,r2] 2 "aoeu"
