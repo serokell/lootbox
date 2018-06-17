@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE AllowAmbiguousTypes       #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE KindSignatures            #-}
@@ -9,6 +10,7 @@
 
 module Loot.Network.Message
        ( Message (..)
+       , getMsgTag
        , Callback (..)
        , CallbackWrapper (..)
        , handler
@@ -32,6 +34,10 @@ import Data.Type.Equality (testEquality)
 -- 'Nat' type family instance).
 class (KnownNat (MsgTag d), Serialise d) => Message d where
     type family MsgTag d = (n :: Nat) | n -> d
+
+-- | Returns message tag.
+getMsgTag :: forall d. Message d => Natural
+getMsgTag = natVal (Proxy @(MsgTag d))
 
 -- | Action called on a particular type (can be either parse error or type itself).
 data Callback m a n =
@@ -77,9 +83,9 @@ createDMap callbacks =
     map (\(CallbackWrapper c@(_ :: Callback m a n)) -> ((SNat :: SNat n) :=> c))
         callbacks
 
--- | Executes a callback given a dmap, switching integer and BS. User
--- must ensure that there is a callback that can be called, otherwise
--- (in case of lookup failure) this function will "error".
+-- | Executes a callback given a dmap, message tag and BS. User must
+-- ensure that there is a callback that can be called, otherwise (in
+-- case of lookup failure) this function will "error".
 runCallbacks :: [CallbackWrapper m a] -> SNat n -> ByteString -> m a
 runCallbacks cbs sn bs =
     case D.lookup sn dmap of
@@ -88,7 +94,7 @@ runCallbacks cbs sn bs =
   where
     dmap = createDMap cbs
 
--- | Same as 'runCallback', but accepts value-level integer.
-runCallbacksInt :: [CallbackWrapper m a] -> Integer -> ByteString -> m a
+-- | Same as 'runCallback', but accepts value-level natural number.
+runCallbacksInt :: [CallbackWrapper m a] -> Natural -> ByteString -> m a
 runCallbacksInt cbs i bs =
-    reifyNat i $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs
+    reifyNat (toInteger i) $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs
