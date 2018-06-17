@@ -5,8 +5,10 @@
 -- | Server-side logic.
 
 module Loot.Network.ZMQ.Server
-       ( ZTCliId(..)
-       , ZTNetServEnv
+       ( ZTCliId (..)
+       , ServRequestQueue
+       , ZTListenerEnv
+       , ZTNetServEnv (..)
        , createNetServEnv
        , runBroker
        , registerListener
@@ -17,7 +19,6 @@ import Control.Concurrent.Async as A
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
-import Control.Lens (lens)
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import qualified Data.List.NonEmpty as NE
@@ -79,12 +80,6 @@ data ZTNetServEnv = ZTNetServEnv
     , ztServLog          :: Level -> Text -> IO ()
       -- ^ Logging function from global context.
     }
-
-instance HasLens ZTNetServEnv r ZTNetServEnv =>
-         HasLens ServRequestQueue r ServRequestQueue where
-    lensOf =
-        (lensOf @ZTNetServEnv) .
-        (lens ztServRequestQueue (\ztce rq2 -> ztce {ztServRequestQueue = rq2}))
 
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
 createNetServEnv (ZTGlobalEnv ctx ztServLog) ztOurNodeId = liftIO $ do
@@ -179,10 +174,10 @@ runBroker = do
       forever action `finally` frontDestroy
 
 registerListener ::
-       (MonadReader r m, HasLens' r ServRequestQueue, MonadIO m)
-    => ListenerId -> Set MsgType -> m ZTListenerEnv
-registerListener lName msgTypes = do
-    servRequestQueue <- unServRequestQueue <$> view (lensOf @ServRequestQueue)
+       (MonadReader r m, MonadIO m)
+    => ServRequestQueue -> ListenerId -> Set MsgType -> m ZTListenerEnv
+registerListener queue lName msgTypes = do
+    let servRequestQueue = unServRequestQueue queue
     liftIO $ do
         biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
 

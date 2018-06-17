@@ -54,6 +54,9 @@ module Loot.Network.ZMQ
        ) where
 
 
-import Loot.Network.ZMQ.Client hiding (getPeers, registerClient, runBroker, updatePeers)
+import Loot.Network.ZMQ.Client (ZTNetCliEnv)
+import Loot.Network.ZMQ.Client hiding (ZTNetCliEnv (..), getPeers, registerClient, runBroker,
+                                updatePeers)
 import Loot.Network.ZMQ.Common
-import Loot.Network.ZMQ.Server hiding (registerListener, runBroker)
+import Loot.Network.ZMQ.Server (ZTNetServEnv)
+import Loot.Network.ZMQ.Server hiding (ZTNetServEnv (..), registerListener, runBroker)

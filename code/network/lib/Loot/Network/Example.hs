@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeFamilies #-}
+
 -- | Playground example of how to use the framework.
 
 module Loot.Network.Example (testZmq) where
@@ -15,7 +17,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import Loot.Base.HasLens (HasLens (..))
 import Loot.Network.Class
 import Loot.Network.ZMQ
-import Loot.Network.ZMQ.Instance ()
+import qualified Loot.Network.ZMQ.Instance as I
 
 ----------------------------------------------------------------------------
 -- State
@@ -40,6 +42,19 @@ instance HasLens ZTGlobalEnv BigState ZTGlobalEnv where
     lensOf = bsCtx
 
 type Env a = ReaderT BigState IO a
+
+instance NetworkingCli ZmqTcp (ReaderT BigState IO) where
+    type NodeId ZmqTcp = I.ZTNodeId
+    runClient = I.runClientDefault
+    getPeers = I.getPeersDefault
+    updatePeers = I.updatePeersDefault
+    registerClient = I.registerClientDefault
+
+instance NetworkingServ ZmqTcp (ReaderT BigState IO) where
+    type CliId ZmqTcp = I.ZTCliId
+    runServer = I.runServerDefault
+    registerListener = I.registerListenerDefault
+
 
 ----------------------------------------------------------------------------
 -- Runners

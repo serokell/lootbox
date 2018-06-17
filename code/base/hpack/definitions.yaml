@@ -35,6 +35,7 @@ _definitions:
         - TemplateHaskell
         - TupleSections
         - TypeApplications
+        - ViewPatterns
 
     - &dependencies
         - base-noprelude

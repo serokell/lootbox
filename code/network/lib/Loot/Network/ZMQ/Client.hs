@@ -5,10 +5,11 @@
 -- | ZMQ Client implementation.
 
 module Loot.Network.ZMQ.Client
-    ( ZTNetCliEnv
+    ( ZTNetCliEnv (..)
     , createNetCliEnv
     , ZTClientEnv
     , CliRequestQueue
+    , ZTUpdatePeersReq
     , runBroker
     , getPeers
     , registerClient
@@ -20,7 +21,7 @@ import qualified Control.Concurrent.Async as A
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
-import Control.Lens (at, lens, makeLenses, (-~))
+import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import Data.Default (def)
@@ -170,12 +171,6 @@ data ZTNetCliEnv = ZTNetCliEnv
     , ztCliLog          :: Level -> Text -> IO ()
       -- ^ Logging function from global context.
     }
-
-instance HasLens ZTNetCliEnv r ZTNetCliEnv =>
-         HasLens CliRequestQueue r CliRequestQueue where
-    lensOf =
-        (lensOf @ZTNetCliEnv) .
-        (lens ztCliRequestQueue (\ztce rq2 -> ztce {ztCliRequestQueue = rq2}))
 
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx ztCliLog) peers = liftIO $ do
@@ -387,20 +382,22 @@ getPeers = readTVarIO =<< (ztPeers <$> view (lensOf @ZTNetCliEnv))
 
 -- | Register a new client.
 registerClient ::
-       (MonadReader r m, HasLens' r CliRequestQueue, MonadIO m)
-    => ClientId -> Set MsgType -> Set Subscription -> m ZTClientEnv
-registerClient clientId msgTs subs = do
-    cliRequestQueue <- unCliRequestQueue <$> view (lensOf @CliRequestQueue)
-    liftIO $ do
-        biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
-        atomically $ TQ.writeTQueue cliRequestQueue $ IRRegister clientId msgTs subs biTQueue
-        pure biTQueue
+       (MonadReader r m, MonadIO m)
+    => CliRequestQueue
+    -> ClientId
+    -> Set MsgType
+    -> Set Subscription
+    -> m ZTClientEnv
+registerClient (unCliRequestQueue -> cliRequestQueue) clientId msgTs subs = liftIO $ do
+    biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
+    atomically $ TQ.writeTQueue cliRequestQueue $ IRRegister clientId msgTs subs biTQueue
+    pure biTQueue
 
 -- | Updates peers.
 updatePeers ::
-       (MonadReader r m, HasLens' r CliRequestQueue, MonadIO m)
-    => ZTUpdatePeersReq
+       (MonadReader r m, MonadIO m)
+    => CliRequestQueue
+    -> ZTUpdatePeersReq
     -> m ()
-updatePeers req = do
-    cliRequestQueue <- unCliRequestQueue <$> view (lensOf @CliRequestQueue)
+updatePeers (unCliRequestQueue -> cliRequestQueue) req =
     atomically $ TQ.writeTQueue cliRequestQueue $ IRUpdatePeers req
