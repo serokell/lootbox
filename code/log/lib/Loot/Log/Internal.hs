@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -14,20 +15,30 @@ module Loot.Log.Internal
        , nameFromStack
        , pkgName
 
+       , NameSelector (..)
+       , _GivenName
        , Logging (..)
+       , hoistLogging
        , MonadLogging (..)
+
+       , logNameSelL
 
        , logDebug
        , logInfo
        , logNotice
        , logWarning
        , logError
+
+       , ModifyLogName (..)
+       , WithLogging
+       , modifyLogName
        ) where
 
 import Prelude hiding (log, toList)
 
+import Control.Lens (Setter', makePrisms, sets)
 import Data.DList (DList)
-import Fmt (Buildable (build), Builder, fmt, (+|), (|+))
+import Fmt (Buildable (build), fmt, (+|), (|+))
 import Fmt.Internal (FromBuilder (fromBuilder))
 import GHC.Exts (IsList (Item, fromList, toList), IsString (fromString))
 import GHC.Stack (CallStack, HasCallStack,
@@ -104,24 +115,62 @@ pkgName full = extract . T.breakOnAll "-" . toText $ full
     extract ((n, _) : [_]) = n
     extract (_ : ns)       = extract ns
 
+-- | One may wish to use names derived from callstack
+-- or manually specified ones.
+data NameSelector
+    = CallstackName
+    | GivenName Name
+
+makePrisms ''NameSelector
+
+-- | Take a 'Name' according to 'NameSelector'.
+selectLogName :: HasCallStack => CallStack -> NameSelector -> Name
+selectLogName cs CallstackName = nameFromStack cs
+selectLogName _ (GivenName n)  = n
 
 -- | Logging capability.
 data Logging m = Logging
-    { _log :: Level -> Name -> Text -> m ()
+    { _log     :: Level -> Name -> Text -> m ()
+    , _logName :: m NameSelector
     }
+
 makeCap ''Logging
 
-logDebug :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logDebug = log Debug (nameFromStack callStack) . getLogEvent
+hoistLogging :: (forall a. m a -> n a) -> Logging m -> Logging n
+hoistLogging hst logging =
+    logging{ _log = \l n t -> hst (_log logging l n t)
+           , _logName = hst (_logName logging)
+           }
+logNameSelL :: Functor m => Setter' (Logging m) NameSelector
+logNameSelL = sets $ \f l -> l{ _logName = fmap f (_logName l) }
 
-logInfo :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logInfo = log Info (nameFromStack callStack) . getLogEvent
+-- | Helper function for use 'logDebug' and family.
+logWith :: (Monad m, MonadLogging m) => Level -> CallStack -> LogEvent -> m ()
+logWith level cs ev = do
+    name <- selectLogName cs <$> logName
+    log level name (getLogEvent ev)
 
-logNotice :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logNotice = log Notice (nameFromStack callStack) . getLogEvent
+logDebug :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logDebug = logWith Debug callStack
 
-logWarning :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logWarning = log Warning (nameFromStack callStack) . getLogEvent
+logInfo :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logInfo = logWith Info callStack
 
-logError :: (HasCallStack, MonadLogging m) => LogEvent -> m ()
-logError = log Error (nameFromStack callStack) . getLogEvent
+logNotice :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logNotice = logWith Notice callStack
+
+logWarning :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logWarning = logWith Warning callStack
+
+logError :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
+logError = logWith Error callStack
+
+-- | Allows to manipulate with logger name.
+class Monad m => ModifyLogName m where
+    modifyLogNameSel :: (NameSelector -> NameSelector) -> m a -> m a
+
+type WithLogging m = (MonadLogging m, ModifyLogName m)
+
+-- | If a manually provided name is used, changes it.
+modifyLogName :: ModifyLogName m => (Name -> Name) -> m a -> m a
+modifyLogName f = modifyLogNameSel (_GivenName %~ f)
