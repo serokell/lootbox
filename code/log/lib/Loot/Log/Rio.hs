@@ -9,7 +9,7 @@ module Loot.Log.Rio
     ) where
 
 import Control.Lens (views)
-import Ether.Internal (HasLens (..))
+import Loot.Base.HasLens (HasLens (..))
 
 import Loot.Log.Internal (Level, Logging (..), Name, NameSelector, logNameSelL)
 

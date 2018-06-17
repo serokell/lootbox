@@ -26,9 +26,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
+import Loot.Base.HasLens (HasLens (..), HasLens')
 import Loot.Log (Level (..))
 import Loot.Network.Class hiding (registerListener)
-import Loot.Network.Utils (HasLens (..), HasLens', whileM)
+import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
                                 ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)

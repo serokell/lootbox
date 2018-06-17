@@ -34,9 +34,10 @@ import qualified Text.Show as T
 
 import qualified System.ZMQ4 as Z
 
+import Loot.Base.HasLens (HasLens (..), HasLens')
 import Loot.Log (Level (..))
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
-import Loot.Network.Utils (HasLens (..), HasLens', whileM)
+import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
                                 ztNodeConnectionIdUnsafe, ztNodeIdPub, ztNodeIdRouter)

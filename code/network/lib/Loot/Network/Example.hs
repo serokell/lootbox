@@ -12,8 +12,8 @@ import Data.Default (def)
 import qualified Data.Set as Set
 import System.IO.Unsafe (unsafePerformIO)
 
+import Loot.Base.HasLens (HasLens (..))
 import Loot.Network.Class
-import Loot.Network.Utils (HasLens (..))
 import Loot.Network.ZMQ
 import Loot.Network.ZMQ.Instance ()
 

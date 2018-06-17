@@ -5,7 +5,8 @@ name: loot-base
 library:
   <<: *lib-common
 
-  dependencies: []
+  dependencies:
+    - tagged
 
 tests:
   loot-base-test:
