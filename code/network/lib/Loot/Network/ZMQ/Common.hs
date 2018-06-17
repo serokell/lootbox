@@ -10,6 +10,7 @@ module Loot.Network.ZMQ.Common
     , withZTGlobalEnv
     , endpointTcp
     , ZTNodeId(..)
+    , parseZTNodeId
     , ztNodeIdRouter
     , ztNodeIdPub
     , ztNodeConnectionId
@@ -21,6 +22,7 @@ module Loot.Network.ZMQ.Common
 import Codec.Serialise (Serialise)
 import Control.Lens (makeLenses)
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.List as L
 
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
@@ -56,12 +58,25 @@ endpointTcp h p = "tcp://" <> h <> ":" <> show p
 
 -- | NodeId as seen in ZMQ TCP.
 data ZTNodeId = ZTNodeId
-    { ztIdHost       :: String  -- ^ Host.
-    , ztIdRouterPort :: Integer -- ^ Port for ROUTER socket.
-    , ztIdPubPort    :: Integer -- ^ Port for PUB socket.
+    { ztIdHost       :: !String  -- ^ Host.
+    , ztIdRouterPort :: !Integer -- ^ Port for ROUTER socket.
+    , ztIdPubPort    :: !Integer -- ^ Port for PUB socket.
     } deriving (Eq, Ord, Show, Generic)
 
 instance Serialise ZTNodeId
+
+-- | Parser of 'ZTNodeId' in form of "host:port1:port2".
+parseZTNodeId :: String -> Either String ZTNodeId
+parseZTNodeId s = case splitBy ':' s of
+    [ztIdHost,p1,p2] ->
+        case (readMaybe p1, readMaybe p2) of
+            (Just ztIdRouterPort, Just ztIdPubPort) -> Right $ ZTNodeId {..}
+            _                                       -> Left "Can't parse either of the ports"
+    _            -> Left "String should have expactly two columns"
+  where
+    splitBy :: Eq a => a -> [a] -> [[a]]
+    splitBy _ [] = []
+    splitBy d s' = x : splitBy d (drop 1 y) where (x,y) = L.span (/= d) s'
 
 -- | Address of the server's ROUTER/frontend socket.
 ztNodeIdRouter :: ZTNodeId -> String
