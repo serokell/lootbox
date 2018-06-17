@@ -31,11 +31,11 @@ instance Message Msg3 where type MsgTag Msg3 = 3
 
 testCallbacks :: IO [Integer]
 testCallbacks = do
-    let create foo = handlerDecoded $ either (const $ pure 0) foo
+    let create foo = handlerDecoded $ \() -> either (const $ pure 0) foo
     let r1 = create $ \(Msg1 _) -> pure 1
     let r2 = create $ \(Msg2 _) -> pure 2
-    e1 <- runCallbacksInt [r1,r2] 1 "aoeu"
-    e2 <- runCallbacksInt [r1,r2] 2 "aoeu"
+    e1 <- runCallbacksInt [r1,r2] 1 "aoeu" ()
+    e2 <- runCallbacksInt [r1,r2] 2 "aoeu" ()
     pure [e1,e2]
 
 spec_runCallbacks :: Spec

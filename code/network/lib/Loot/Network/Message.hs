@@ -39,27 +39,33 @@ class (KnownNat (MsgTag d), Serialise d) => Message d where
 getMsgTag :: forall d. Message d => Natural
 getMsgTag = natVal (Proxy @(MsgTag d))
 
--- | Action called on a particular type (can be either parse error or type itself).
-data Callback m a n =
+-- | Action called on a particular type (can be either parse error or
+-- type itself). Callback's main feature is that it links the message
+-- type with a bytestring using 'Tagged'. Nevertheless, user might
+-- wath real callback function to have other argumets, and that's what
+-- "ex" parameter does. In networking, the real message is passed as a
+-- tagged bytestring and 'ex' can contain sender address or anything
+-- else.
+data Callback ex m a n =
     forall d. (Message d, MsgTag d ~ n) =>
-    Callback { unCallback :: Tagged d ByteString -> m a }
+    Callback { unCallback :: ex -> Tagged d ByteString -> m a }
 
 -- | Packed callback.
-data CallbackWrapper m a =
-    forall n. KnownNat n => CallbackWrapper { unCallbackWrapper :: Callback m a n }
+data CallbackWrapper ex m a =
+    forall n. KnownNat n => CallbackWrapper { unCallbackWrapper :: Callback ex m a n }
 
 -- | Convenient helper to create callback wrappers (from raw bytestring input).
-handler :: Message d => (Tagged d ByteString -> m a) -> CallbackWrapper m a
+handler :: Message d => (ex -> Tagged d ByteString -> m a) -> CallbackWrapper ex m a
 handler = CallbackWrapper . Callback
 
 -- | Callback wrapper from function processing parsed value.
 handlerDecoded ::
-       forall d m a. Message d
-    => (Either DeserialiseFailure d -> m a)
-    -> CallbackWrapper m a
+       forall ex d m a. Message d
+    => (ex -> Either DeserialiseFailure d -> m a)
+    -> CallbackWrapper ex m a
 handlerDecoded action =
-    handler $ \(Tagged bs :: Tagged d ByteString) ->
-                action (deserialiseOrFail $ BSL.fromStrict bs)
+    handler $ \ex (Tagged bs :: Tagged d ByteString) ->
+                action ex (deserialiseOrFail $ BSL.fromStrict bs)
 
 instance GEq (Sing :: Nat -> *) where
     geq = testEquality
@@ -77,24 +83,24 @@ instance D.GCompare (Sing :: Nat -> *) where
 -- Creates a dmap from callbacks. If more than one callback with the
 -- same incoming message typewill be in the list, only first will be
 -- put in.
-createDMap :: forall m a. [CallbackWrapper m a] -> D.DMap Sing (Callback m a)
+createDMap :: forall ex m a. [CallbackWrapper ex m a] -> D.DMap Sing (Callback ex m a)
 createDMap callbacks =
     D.fromList $
-    map (\(CallbackWrapper c@(_ :: Callback m a n)) -> ((SNat :: SNat n) :=> c))
+    map (\(CallbackWrapper c@(_ :: Callback ex m a n)) -> ((SNat :: SNat n) :=> c))
         callbacks
 
 -- | Executes a callback given a dmap, message tag and BS. User must
 -- ensure that there is a callback that can be called, otherwise (in
 -- case of lookup failure) this function will "error".
-runCallbacks :: [CallbackWrapper m a] -> SNat n -> ByteString -> m a
-runCallbacks cbs sn bs =
+runCallbacks :: [CallbackWrapper ex m a] -> SNat n -> ByteString -> ex -> m a
+runCallbacks cbs sn bs ex =
     case D.lookup sn dmap of
-      Just (Callback x) -> x (Tagged bs)
+      Just (Callback x) -> x ex (Tagged bs)
       Nothing           -> error "runCallback: lookup in DMap failed"
   where
     dmap = createDMap cbs
 
 -- | Same as 'runCallback', but accepts value-level natural number.
-runCallbacksInt :: [CallbackWrapper m a] -> Natural -> ByteString -> m a
-runCallbacksInt cbs i bs =
-    reifyNat (toInteger i) $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs
+runCallbacksInt :: [CallbackWrapper ex m a] -> Natural -> ByteString -> ex -> m a
+runCallbacksInt cbs i bs ex =
+    reifyNat (toInteger i) $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs ex
