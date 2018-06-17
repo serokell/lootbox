@@ -13,5 +13,5 @@ ghc-options: *ghc-options
 library:
   <<: *lib-common
   dependencies:
-    - base
+    - base-noprelude
     - universum
