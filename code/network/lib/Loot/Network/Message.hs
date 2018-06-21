@@ -92,16 +92,16 @@ createDMap callbacks =
 
 -- | Executes a callback given a dmap, message tag and BS. User must
 -- ensure that there is a callback that can be called, otherwise (in
--- case of lookup failure) this function will "error".
-runCallbacks :: [CallbackWrapper ex m a] -> SNat n -> ByteString -> ex -> m a
+-- case of lookup failure) this function will return Nothing.
+runCallbacks :: Monad m => [CallbackWrapper ex m a] -> SNat n -> ByteString -> ex -> m (Maybe a)
 runCallbacks cbs sn bs ex =
     case D.lookup sn dmap of
-      Just (Callback x) -> x ex (Tagged bs)
-      Nothing           -> error "runCallback: lookup in DMap failed"
+      Just (Callback x) -> Just <$> x ex (Tagged bs)
+      Nothing           -> pure Nothing
   where
     dmap = createDMap cbs
 
 -- | Same as 'runCallback', but accepts value-level natural number.
-runCallbacksInt :: [CallbackWrapper ex m a] -> Natural -> ByteString -> ex -> m a
+runCallbacksInt :: Monad m => [CallbackWrapper ex m a] -> Natural -> ByteString -> ex -> m (Maybe a)
 runCallbacksInt cbs i bs ex =
     reifyNat (toInteger i) $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs ex

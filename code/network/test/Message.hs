@@ -37,17 +37,18 @@ instance Message K2 Msg3 where type MsgTag K2 Msg3 = 3
 --instance Message K1 Msg3 where type MsgTag K2 Msg3 = 4
 
 
-testCallbacks :: IO [Integer]
+testCallbacks :: IO [Maybe Integer]
 testCallbacks = do
     let create foo = handlerDecoded $ \() -> either (const $ pure 0) foo
     let r1 = create $ \(Msg1 _) -> pure 1
     let r2 = create $ \(Msg2 _) -> pure 2
     e1 <- runCallbacksInt [r1,r2] 1 "aoeu" ()
     e2 <- runCallbacksInt [r1,r2] 2 "aoeu" ()
-    pure [e1,e2]
+    e3 <- runCallbacksInt [r1,r2] 4 "aoeu" ()
+    pure [e1,e2,e3]
 
 spec_runCallbacks :: Spec
 spec_runCallbacks = describe "message dispatcher" $ do
     res <- runIO testCallbacks
     it "should return expected result" $
-        res `shouldBe` [1,2]
+        res `shouldBe` [Just 1, Just 2, Nothing]
