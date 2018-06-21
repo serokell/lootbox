@@ -31,13 +31,14 @@ import Data.Type.Equality (testEquality)
 
 -- todo require typeable?
 -- | Message is a type that has unique message type (expressed by
--- 'Nat' type family instance).
-class (KnownNat (MsgTag d), Serialise d) => Message d where
-    type family MsgTag d = (n :: Nat) | n -> d
+-- 'Nat' type family instance). Parameter k is a kind to create
+-- non-intersecting families of messages.
+class (KnownNat (MsgTag k d), Serialise d) => Message k d | d -> k where
+    type family MsgTag k d = (n :: Nat) | n -> k d
 
 -- | Returns message tag.
-getMsgTag :: forall d. Message d => Natural
-getMsgTag = natVal (Proxy @(MsgTag d))
+getMsgTag :: forall k d. Message k d => Natural
+getMsgTag = natVal (Proxy @(MsgTag k d))
 
 -- | Action called on a particular type (can be either parse error or
 -- type itself). Callback's main feature is that it links the message
@@ -47,24 +48,24 @@ getMsgTag = natVal (Proxy @(MsgTag d))
 -- tagged bytestring and 'ex' can contain sender address or anything
 -- else.
 data Callback ex m a n =
-    forall d. (Message d, MsgTag d ~ n) =>
-    Callback { unCallback :: ex -> Tagged d ByteString -> m a }
+    forall k d. (Message k d, MsgTag k d ~ n) =>
+    Callback { unCallback :: ex -> Tagged (k,d) ByteString -> m a }
 
 -- | Packed callback.
 data CallbackWrapper ex m a =
     forall n. KnownNat n => CallbackWrapper { unCallbackWrapper :: Callback ex m a n }
 
 -- | Convenient helper to create callback wrappers (from raw bytestring input).
-handler :: Message d => (ex -> Tagged d ByteString -> m a) -> CallbackWrapper ex m a
+handler :: Message k d => (ex -> Tagged (k,d) ByteString -> m a) -> CallbackWrapper ex m a
 handler = CallbackWrapper . Callback
 
 -- | Callback wrapper from function processing parsed value.
 handlerDecoded ::
-       forall ex d m a. Message d
+       forall ex k d m a. Message k d
     => (ex -> Either DeserialiseFailure d -> m a)
     -> CallbackWrapper ex m a
 handlerDecoded action =
-    handler $ \ex (Tagged bs :: Tagged d ByteString) ->
+    handler $ \ex (Tagged bs :: Tagged (k,d) ByteString) ->
                 action ex (deserialiseOrFail $ BSL.fromStrict bs)
 
 instance GEq (Sing :: Nat -> *) where

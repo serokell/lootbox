@@ -10,6 +10,9 @@ import Loot.Network.Message
 import Test.Hspec
 
 
+data K1
+data K2
+
 data Msg1 = Msg1 String
 data Msg2 = Msg2 Integer
 data Msg3 = Msg3 Double
@@ -24,10 +27,15 @@ instance Serialise Msg3 where
     encode = error "test"
     decode = pure $ Msg3 1.2345
 
-instance Message Msg1 where type MsgTag Msg1 = 1
-instance Message Msg2 where type MsgTag Msg2 = 2
--- it's an error if you put "2" here, thanks to injective type families
-instance Message Msg3 where type MsgTag Msg3 = 3
+instance Message K1 Msg1 where type MsgTag K1 Msg1 = 1
+instance Message K1 Msg2 where type MsgTag K1 Msg2 = 2
+instance Message K2 Msg3 where type MsgTag K2 Msg3 = 3
+
+-- Error: MsgTags should be unique
+--instance Message K2 Msg3 where type MsgTag K2 Msg3 = 2
+-- Error: Msg3 can be either K1 or K2.
+--instance Message K1 Msg3 where type MsgTag K2 Msg3 = 4
+
 
 testCallbacks :: IO [Integer]
 testCallbacks = do
