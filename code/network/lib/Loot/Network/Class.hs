@@ -116,7 +116,7 @@ type ClientEnv t = BiTQueue (NodeId t, CliRecvMsg) (Maybe (NodeId t), (MsgType, 
 type ClientId = ByteString
 
 -- | Client-side networking interface.
-class (Monad m, Ord (NodeId t)) => NetworkingCli t m where
+class (Monad m, Ord (NodeId t)) => NetworkingCli t m | m -> t where
     -- | Full-size identities -- ports/hosts. Something we can connect to.
     type NodeId t
 
@@ -155,7 +155,7 @@ type ListenerEnv t = BiTQueue (CliId t, MsgType, Content) (ServSendMsg (CliId t)
 type ListenerId = ByteString
 
 -- | Server-side networking interface.
-class (Monad m, Ord (CliId t)) => NetworkingServ t m where
+class (Monad m, Ord (CliId t)) => NetworkingServ t m | m -> t where
     -- | Client identifier as seen from the server part. Clients do
     -- not have publicly recognized ids unlike servers, so it may be
     -- any bytestring.
