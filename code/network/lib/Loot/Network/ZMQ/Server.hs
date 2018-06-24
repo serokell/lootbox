@@ -131,7 +131,7 @@ runBroker = do
                     lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
 
             whenLeft res $ \e -> error $ "Server IRRegister: " <> e
-            ztLog ztServLogging Debug $ "server: registered listener " <> show listenerId
+            ztLog ztServLogging Debug $ "Registered listener " <> show listenerId
 
         processReq IRHeartBeat = publish heartbeatSubscription []
 

@@ -306,7 +306,7 @@ runBroker = do
                 case res of
                     Left e        -> error $ "Client IRRegister: " <> e
                     Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
-                ztCliLog Debug $ "registering client " <> show clientId <> " done"
+                ztCliLog Debug $ "Registered client " <> show clientId
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- maybe choosePeer pure nodeIdM
@@ -327,15 +327,15 @@ runBroker = do
                     onHeartbeat nodeId
                     clientIdM <-
                         atomically $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
-                    maybe (ztCliLog Warning $ "client btc: couldn't find client " <>
+                    maybe (ztCliLog Warning $ "backendToClients: couldn't find client " <>
                                               "with this message type")
                           (\clientId -> sendToClient clientId (nodeId, Response (MsgType msgT) msg))
                           clientIdM
-            other -> ztCliLog Warning $ "client btc: wrong format: " <> show other
+            other -> ztCliLog Warning $ "backendToClients: wrong format: " <> show other
 
     let subToClients = \case
             (k:addr:content) -> resolvePeer addr >>= \case
-                Nothing -> ztCliLog Warning $ "Client stc: couldn't resolve peer: " <> show addr
+                Nothing -> ztCliLog Warning $ "subToClients: couldn't resolve peer: " <> show addr
                 Just nodeId -> do
                     let k' = Subscription k
                     onHeartbeat nodeId
@@ -351,9 +351,9 @@ runBroker = do
                             -- that our clients records are broken
                             -- (we're subscribed to something no
                             -- client needs).
-                            error $ "Client stc: Nobody got the subscription " <>
+                            error $ "subToClients: Nobody got the subscription " <>
                                     "message for key " <> show k
-            other -> ztCliLog Warning $ "Client stc: wrong format: " <> show other
+            other -> ztCliLog Warning $ "subToClients: wrong format: " <> show other
 
     hbWorker <- liftIO $ A.async $ heartbeatWorker cEnv
     (_, backStmTry, backDestroy) <- socketWaitReadSTMLong ztCliBack
