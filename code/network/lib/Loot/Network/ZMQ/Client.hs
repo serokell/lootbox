@@ -36,11 +36,11 @@ import qualified Text.Show as T
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log (Level (..))
+import Loot.Log.Internal (Level (..), Logging (..), logNameSelL, _GivenName)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription, ztLog,
                                 ztNodeConnectionIdUnsafe, ztNodeIdPub, ztNodeIdRouter)
 
 ----------------------------------------------------------------------------
@@ -168,12 +168,12 @@ data ZTNetCliEnv = ZTNetCliEnv
       -- ^ Queue to read (internal, administrative) client requests
       -- from, like updating peers or resetting connection.
 
-    , ztCliLog          :: Level -> Text -> IO ()
+    , ztCliLogging      :: Logging IO
       -- ^ Logging function from global context.
     }
 
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
-createNetCliEnv (ZTGlobalEnv ctx ztCliLog) peers = liftIO $ do
+createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     -- I guess it's alright to connect ROUTER instead of binding it.
     -- https://stackoverflow.com/questions/16109139/zmq-when-to-use-zmq-bind-or-zmq-connect
     ztCliBack <- Z.socket ctx Z.Router
@@ -190,6 +190,7 @@ createNetCliEnv (ZTGlobalEnv ctx ztCliLog) peers = liftIO $ do
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
 
+    let ztCliLogging = ztLogging & logNameSelL . _GivenName %~ (<> "cli")
     let cliEnv = ZTNetCliEnv {..}
     changePeers cliEnv $ def & uprAdd .~ peers
     pure cliEnv
@@ -218,7 +219,7 @@ changePeers ZTNetCliEnv{..} req = liftIO $ do
 
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
-    ztCliLog Info $ "Reconnecting peers: " <> show nIds
+    ztLog ztCliLogging Info $ "Reconnecting peers: " <> show nIds
 
     forM_ nIds $ \nId -> do
         Z.disconnect ztCliBack (ztNodeIdRouter nId)
@@ -251,6 +252,8 @@ data CliBrokerStmRes
 runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
     cEnv@ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
+
+    let ztCliLog = ztLog ztCliLogging
     -- This function may do something creative (LRU! Lowest ping!),
     -- but instead (for now) it'll just choose a random peer.
     let choosePeer = do

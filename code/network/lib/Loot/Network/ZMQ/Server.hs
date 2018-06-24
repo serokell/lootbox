@@ -29,12 +29,12 @@ import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log (Level (..))
+import Loot.Log.Internal (Level (..), Logging (..), logNameSelL, _GivenName)
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription, ztLog,
                                 ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
 
 
@@ -83,12 +83,12 @@ data ZTNetServEnv = ZTNetServEnv
     , ztServRequestQueue :: ServRequestQueue
       -- ^ Request queue for server.
 
-    , ztServLog          :: Level -> Text -> IO ()
+    , ztServLogging      :: Logging IO
       -- ^ Logging function from global context.
     }
 
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
-createNetServEnv (ZTGlobalEnv ctx ztServLog) ztOurNodeId = liftIO $ do
+createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
     ztServFront <- Z.socket ctx Z.Router
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
     Z.bind ztServFront (ztNodeIdRouter ztOurNodeId)
@@ -100,6 +100,7 @@ createNetServEnv (ZTGlobalEnv ctx ztServLog) ztOurNodeId = liftIO $ do
     ztMsgTypes <- newTVarIO mempty
     ztServRequestQueue <- ServRequestQueue <$> TQ.newTQueueIO
 
+    let ztServLogging = ztLogging & logNameSelL . _GivenName %~ (<> "serv")
     pure ZTNetServEnv {..}
 
 data ServBrokerStmRes
@@ -130,7 +131,7 @@ runBroker = do
                     lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
 
             whenLeft res $ \e -> error $ "Server IRRegister: " <> e
-            ztServLog Debug $ "server: registered listener " <> show listenerId
+            ztLog ztServLogging Debug $ "server: registered listener " <> show listenerId
 
         processReq IRHeartBeat = publish heartbeatSubscription []
 
@@ -146,11 +147,11 @@ runBroker = do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
                 case ztEnv of
-                  Nothing  -> ztServLog Warning "frontToListener: can't resolve msgT"
+                  Nothing  -> ztLog ztServLogging Warning "frontToListener: can't resolve msgT"
                   Just biQ ->
                       atomically $ TQ.writeTQueue (bReceiveQ biQ)
                                                   (ZTCliId cId, MsgType msgT, msg)
-            _ -> ztServLog Warning "frontToListener: wrong format"
+            _ -> ztLog ztServLogging Warning "frontToListener: wrong format"
 
     let hbWorker = forever $ do
             let heartbeatInterval = 300000 -- 300 ms

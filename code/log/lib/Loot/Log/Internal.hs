@@ -17,6 +17,7 @@ module Loot.Log.Internal
 
        , NameSelector (..)
        , _GivenName
+       , selectLogName
        , Logging (..)
        , hoistLogging
        , MonadLogging (..)
@@ -138,9 +139,10 @@ makeCap ''Logging
 
 hoistLogging :: (forall a. m a -> n a) -> Logging m -> Logging n
 hoistLogging hst logging =
-    logging{ _log = \l n t -> hst (_log logging l n t)
-           , _logName = hst (_logName logging)
-           }
+    logging { _log = \l n t -> hst (_log logging l n t)
+            , _logName = hst (_logName logging)
+            }
+
 logNameSelL :: Functor m => Setter' (Logging m) NameSelector
 logNameSelL = sets $ \f l -> l{ _logName = fmap f (_logName l) }
 
@@ -166,7 +168,7 @@ logError :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
 logError = logWith Error callStack
 
 -- | Allows to manipulate with logger name.
-class Monad m => ModifyLogName m where
+class MonadLogging m => ModifyLogName m where
     modifyLogNameSel :: (NameSelector -> NameSelector) -> m a -> m a
 
 type WithLogging m = (MonadLogging m, ModifyLogName m)

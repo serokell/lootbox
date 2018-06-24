@@ -9,7 +9,7 @@ module Loot.Log.Rio
     ) where
 
 import Control.Lens (views)
-import Loot.Base.HasLens (HasLens (..))
+import Loot.Base.HasLens (HasLens', lensOf)
 
 import Loot.Log.Internal (Level, Logging (..), Name, NameSelector, logNameSelL)
 
@@ -22,7 +22,7 @@ type LoggingIO = Logging IO
 -- | Default implementation of 'MonadLogging.log' (generated with 'makeCap').
 defaultLog
     :: forall m ctx.
-       (HasLens LoggingIO ctx LoggingIO, MonadReader ctx m, MonadIO m)
+       (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
     => Level -> Name -> Text -> m ()
 defaultLog l n t = do
     lg <- views (lensOf @LoggingIO) _log
@@ -32,14 +32,14 @@ defaultLog l n t = do
 -- 'makeCap').
 defaultLogName
     :: forall m ctx.
-       (HasLens LoggingIO ctx LoggingIO, MonadReader ctx m, MonadIO m)
+       (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
     => m NameSelector
 defaultLogName = view (lensOf @LoggingIO) >>= liftIO . _logName
 
--- | Default implementation of 'modifyLogNameSel' stack.
+-- | Default implementation of 'modifyLogNameSel' method.
 defaultModifyLogNameSel
     :: forall m ctx a.
-       (HasLens LoggingIO ctx LoggingIO, MonadReader ctx m)
+       (HasLens' ctx LoggingIO, MonadReader ctx m)
     => (NameSelector -> NameSelector) -> m a -> m a
 defaultModifyLogNameSel f =
     local (lensOf @LoggingIO . logNameSelL %~ f)

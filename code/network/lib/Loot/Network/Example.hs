@@ -14,6 +14,7 @@ import qualified Data.Set as Set
 import System.IO.Unsafe (unsafePerformIO)
 
 import Loot.Base.HasLens (HasLens (..))
+import Loot.Log.Internal (Logging (..), NameSelector (GivenName))
 import Loot.Network.BiTQueue (recvBtq, sendBtq)
 import Loot.Network.Class
 import Loot.Network.ZMQ
@@ -69,8 +70,9 @@ log x = do
 
 runZMQ :: ZTNodeId -> Env () -> Env () -> IO ()
 runZMQ nId server client = do
-    let logFoo l t = putTextLn $ "[" <> show l <> "]: " <> t
-    withZTGlobalEnv logFoo $ \ztEnv -> do
+    let logFoo l n t = putTextLn $ "[" <> show l <> "] " <> show n <> ": " <> t
+    let logging = Logging logFoo (pure $ GivenName "network")
+    withZTGlobalEnv logging $ \ztEnv -> do
         cliEnv <- createNetCliEnv ztEnv mempty
         servEnv <- createNetServEnv ztEnv nId
         flip runReaderT (BigState cliEnv servEnv ztEnv) $ do
