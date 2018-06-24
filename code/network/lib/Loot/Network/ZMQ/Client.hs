@@ -303,10 +303,19 @@ runBroker = do
                 case res of
                     Left e        -> error $ "Client IRRegister: " <> e
                     Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
+                ztCliLog Debug $ "registering client " <> show clientId <> " done"
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
-            nodeId <- ztNodeConnectionIdUnsafe <$> maybe choosePeer pure nodeIdM
-            Z.sendMulti ztCliBack $ NE.fromList $ [nodeId, "", unMsgType msgT] ++ msg
+            nodeId <- maybe choosePeer pure nodeIdM
+
+            -- this warning can be removed if speed is crucial
+            present <- atomically $ Set.member nodeId <$> readTVar ztPeers
+            unless present $ do
+                ztCliLog Warning $ "Sending message with type " <> show msgT <>
+                                   ", but client " <> show nodeId <> " is not our peer"
+
+            Z.sendMulti ztCliBack $ NE.fromList $
+                [ztNodeConnectionIdUnsafe nodeId, "", unMsgType msgT] ++ msg
 
     let backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case

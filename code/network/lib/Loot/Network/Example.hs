@@ -81,7 +81,7 @@ testZmq = do
     let n1 = (ZTNodeId "127.0.0.1" 8001 8002)
     let n2 = (ZTNodeId "127.0.0.1" 8003 8004)
     let node1 = do
-            let runPonger biQ = forever $ do
+            let runPonger biQ = forever $
                     atomically $ do
                         (cId, msgT, content) <- recvBtq biQ
                         when (msgT == "ping" && content == [""]) $
@@ -106,16 +106,12 @@ testZmq = do
                     void $ A.concurrently_ (runPonger biQ1) $
                            A.concurrently_ (runPublisher biQ2) $
                            servWithCancel
-            liftIO $ threadDelay 100000
             log "server: *starting*"
             runZMQ n1 server pass
     let node2 = do
             let runPinger biQ = forever $ do
-
-                    liftIO $ threadDelay 1000000
                     log "pinger: sending"
                     atomically $ sendBtq biQ (Just n1, ("ping",[""]))
-                    liftIO $ threadDelay 50000
                     log "pinger: sent ping, waiting for reply"
                     doUnlessM $ do
                         (nId,msg) <- atomically $ recvBtq biQ
@@ -123,7 +119,7 @@ testZmq = do
                             then True <$ log "pinger: got correct response"
                             else False <$ log ("pinger: got something else, probably " <>
                                               "subscription: " <> show msg)
-                    liftIO $ threadDelay 50000
+                    liftIO $ threadDelay 1500000
             let runSubreader biQ = forever $ do
                     x <- atomically $ recvBtq biQ
                     log $ "subreader: got " <> show x
@@ -140,7 +136,7 @@ testZmq = do
                     void $ A.concurrently_ (runPinger biQ1) $
                            A.concurrently_ (runSubreader biQ2) $
                            (runClient @ZmqTcp)
-            liftIO $ threadDelay 200000
+            liftIO $ threadDelay 1000000 -- wait for the server to start
             log "client: *starting*"
             runZMQ n2 pass client
     void $ A.concurrently node1 node2

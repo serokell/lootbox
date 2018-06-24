@@ -23,6 +23,7 @@ import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
+import qualified Text.Show as T
 
 import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
@@ -44,6 +45,10 @@ import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscr
 data InternalRequest
     = IRRegister ListenerId (Set MsgType) ZTListenerEnv
     | IRHeartBeat
+
+instance T.Show InternalRequest where
+    show IRHeartBeat          = "IRHeartBeat"
+    show (IRRegister lId _ _) = "IRRegister " <> show lId
 
 newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue InternalRequest }
 
@@ -101,6 +106,7 @@ data ServBrokerStmRes
     = SBListener ListenerId ZTServSendMsg
     | SBFront
     | SBRequest InternalRequest
+    deriving (Show)
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
@@ -123,7 +129,9 @@ runBroker = do
                 forM_ msgTypes $ \msgT ->
                     lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
 
-            either (\e -> error $ "Server IRRegister: " <> e) (const pass) res
+            whenLeft res $ \e -> error $ "Server IRRegister: " <> e
+            ztServLog Debug $ "server: registered listener " <> show listenerId
+
         processReq IRHeartBeat = publish heartbeatSubscription []
 
     let processMsg = \case
@@ -149,9 +157,8 @@ runBroker = do
             threadDelay heartbeatInterval
             atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
-    liftIO $ A.concurrently_ hbWorker $ do
+    liftIO $ A.withAsync hbWorker $ const $ do
       (_, frontStmTry, frontDestroy) <- socketWaitReadSTMLong ztServFront
-      -- TODO add heartbeating trigger worker sending new type SBRequest.
       let action = liftIO $ do
               results <- atomically $ do
                   lMap <- readTVar ztListeners
