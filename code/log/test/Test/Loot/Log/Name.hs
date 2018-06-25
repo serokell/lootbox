@@ -2,8 +2,6 @@
 
 module Test.Loot.Log.Name where
 
-import Universum
-
 import Fmt ((+|), (|+))
 
 import Loot.Log.Internal

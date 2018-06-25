@@ -14,6 +14,7 @@ library:
     - dependent-sum
     - lens
     - lifted-async
+    - loot-base
     - loot-log
     - mtl
     - network
@@ -37,6 +38,7 @@ tests:
       - hedgehog
       - hspec
       - loot-network
+      - serialise
       - stm
       - tasty
       - tasty-discover

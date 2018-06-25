@@ -1,37 +1,68 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | ZMQ TCP instance for Network.Class, constraint-based.
 
-module Loot.Network.ZMQ.Instance () where
+module Loot.Network.ZMQ.Instance
+    (
+      ZTNodeId
+    , runClientDefault
+    , getPeersDefault
+    , updatePeersDefault
+    , registerClientDefault
 
+    , ZS.ZTCliId
+    , runServerDefault
+    , registerListenerDefault
+    ) where
+
+import Loot.Base.HasLens (HasLens (..), HasLens')
 import qualified Loot.Network.Class as C
-import Loot.Network.Utils (HasLens')
 import qualified Loot.Network.ZMQ.Client as ZC
-import Loot.Network.ZMQ.Common (ZTGlobalEnv, ZTNodeId, ZmqTcp)
+import Loot.Network.ZMQ.Common (ZTNodeId)
 import qualified Loot.Network.ZMQ.Server as ZS
 
-instance ( MonadReader r m
-         , HasLens' r ZTGlobalEnv
-         , HasLens' r ZC.ZTNetCliEnv
-         , MonadIO m
-         , MonadMask m
-         ) =>
-         C.NetworkingCli ZmqTcp m where
-    type NodeId ZmqTcp = ZTNodeId
-    runClient = ZC.runBroker
-    getPeers = ZC.getPeers
-    updatePeers = ZC.updatePeers
-    registerClient = ZC.registerClient
+type ReaderIOM r m = (MonadReader r m, MonadIO m)
 
-instance ( MonadReader r m
-         , HasLens' r ZTGlobalEnv
-         , HasLens' r ZS.ZTNetServEnv
-         , MonadIO m
-         , MonadMask m) => C.NetworkingServ ZmqTcp m where
+----------------------------------------------------------------------------
+-- Client
+----------------------------------------------------------------------------
 
-    type CliId ZmqTcp = ZS.ZTCliId
+runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, MonadMask m) => m ()
+runClientDefault = ZC.runBroker
 
-    runServer = ZS.runBroker
-    registerListener = ZS.registerListener
+getPeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
+getPeersDefault = ZC.getPeers
+
+updatePeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => ZC.ZTUpdatePeersReq -> m ()
+updatePeersDefault x = do
+    q <- ZC.ztCliRequestQueue <$> view (lensOf @ZC.ZTNetCliEnv)
+    ZC.updatePeers q x
+
+registerClientDefault ::
+       (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv)
+    => C.ClientId
+    -> Set C.MsgType
+    -> Set C.Subscription
+    -> m ZC.ZTClientEnv
+registerClientDefault c m s = do
+    q <- ZC.ztCliRequestQueue <$> view (lensOf @ZC.ZTNetCliEnv)
+    ZC.registerClient q c m s
+
+----------------------------------------------------------------------------
+-- Server
+----------------------------------------------------------------------------
+
+runServerDefault :: (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv, MonadMask m) => m ()
+runServerDefault = ZS.runBroker
+
+registerListenerDefault ::
+       (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv)
+    => C.ListenerId
+    -> Set C.MsgType
+    -> m ZS.ZTListenerEnv
+registerListenerDefault l m = do
+    q <- ZS.ztServRequestQueue <$> view (lensOf @ZS.ZTNetServEnv)
+    ZS.registerListener q l m

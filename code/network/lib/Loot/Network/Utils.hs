@@ -5,32 +5,16 @@
 -- later.
 
 module Loot.Network.Utils
-    ( LensLike
-    , HasLens (..)
-    , HasLens'
-    , findM
+    ( findM
     , tMeasure
     , tMeasureIO
     , whileM
     ) where
 
-import Control.Lens (LensLike)
-import Data.Coerce (coerce)
-import Data.Tagged (Tagged (..))
 import qualified Data.Time.Clock as Tm
 import Numeric as N
 
-class HasLens tag outer inner | tag outer -> inner where
-    lensOf :: Lens' outer inner
-
-instance HasLens a a a where
-    lensOf = id
-
-instance HasLens t (Tagged t a) a where
-    lensOf = \f -> fmap coerce . f . coerce
-
-type HasLens' s a = HasLens a s a
-
+-- | Monadic version of 'find'.
 findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
 findM _ []     = pure Nothing
 findM p (x:xs) = ifM (p x) (pure $ Just x) (findM p xs)
@@ -53,5 +37,6 @@ tMeasure logAction label action = do
   where
     formatFloatN n numOfDecimals = fromString $ N.showFFloat (Just numOfDecimals) n ""
 
+-- | Execute "pred >>= action" while predicate returns true.
 whileM :: (Monad m) => m Bool -> m () -> m ()
 whileM predicate action = whenM predicate (action >> whileM predicate action)

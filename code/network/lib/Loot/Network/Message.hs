@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE AllowAmbiguousTypes       #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE KindSignatures            #-}
@@ -9,6 +10,7 @@
 
 module Loot.Network.Message
        ( Message (..)
+       , getMsgTag
        , Callback (..)
        , CallbackWrapper (..)
        , handler
@@ -27,32 +29,44 @@ import Data.Singletons.TypeLits hiding (natVal)
 import Data.Tagged (Tagged (..))
 import Data.Type.Equality (testEquality)
 
+-- todo require typeable?
 -- | Message is a type that has unique message type (expressed by
--- 'Nat' type family instance).
-class (KnownNat (MsgTag d), Serialise d) => Message d where
-    type family MsgTag d = (n :: Nat) | n -> d
+-- 'Nat' type family instance). Parameter k is a kind to create
+-- non-intersecting families of messages.
+class (KnownNat (MsgTag k d), Serialise d) => Message k d | d -> k where
+    type family MsgTag k d = (n :: Nat) | n -> k d
 
--- | Action called on a particular type (can be either parse error or type itself).
-data Callback m a n =
-    forall d. (Message d, MsgTag d ~ n) =>
-    Callback { unCallback :: Tagged d ByteString -> m a }
+-- | Returns message tag.
+getMsgTag :: forall k d. Message k d => Natural
+getMsgTag = natVal (Proxy @(MsgTag k d))
+
+-- | Action called on a particular type (can be either parse error or
+-- type itself). Callback's main feature is that it links the message
+-- type with a bytestring using 'Tagged'. Nevertheless, user might
+-- wath real callback function to have other argumets, and that's what
+-- "ex" parameter does. In networking, the real message is passed as a
+-- tagged bytestring and 'ex' can contain sender address or anything
+-- else.
+data Callback ex m a n =
+    forall k d. (Message k d, MsgTag k d ~ n) =>
+    Callback { unCallback :: ex -> Tagged (k,d) ByteString -> m a }
 
 -- | Packed callback.
-data CallbackWrapper m a =
-    forall n. KnownNat n => CallbackWrapper { unCallbackWrapper :: Callback m a n }
+data CallbackWrapper ex m a =
+    forall n. KnownNat n => CallbackWrapper { unCallbackWrapper :: Callback ex m a n }
 
 -- | Convenient helper to create callback wrappers (from raw bytestring input).
-handler :: Message d => (Tagged d ByteString -> m a) -> CallbackWrapper m a
+handler :: Message k d => (ex -> Tagged (k,d) ByteString -> m a) -> CallbackWrapper ex m a
 handler = CallbackWrapper . Callback
 
 -- | Callback wrapper from function processing parsed value.
 handlerDecoded ::
-       forall d m a. Message d
-    => (Either DeserialiseFailure d -> m a)
-    -> CallbackWrapper m a
+       forall ex k d m a. Message k d
+    => (ex -> Either DeserialiseFailure d -> m a)
+    -> CallbackWrapper ex m a
 handlerDecoded action =
-    handler $ \(Tagged bs :: Tagged d ByteString) ->
-                action (deserialiseOrFail $ BSL.fromStrict bs)
+    handler $ \ex (Tagged bs :: Tagged (k,d) ByteString) ->
+                action ex (deserialiseOrFail $ BSL.fromStrict bs)
 
 instance GEq (Sing :: Nat -> *) where
     geq = testEquality
@@ -70,54 +84,24 @@ instance D.GCompare (Sing :: Nat -> *) where
 -- Creates a dmap from callbacks. If more than one callback with the
 -- same incoming message typewill be in the list, only first will be
 -- put in.
-createDMap :: forall m a. [CallbackWrapper m a] -> D.DMap Sing (Callback m a)
+createDMap :: forall ex m a. [CallbackWrapper ex m a] -> D.DMap Sing (Callback ex m a)
 createDMap callbacks =
     D.fromList $
-    map (\(CallbackWrapper c@(_ :: Callback m a n)) -> ((SNat :: SNat n) :=> c))
+    map (\(CallbackWrapper c@(_ :: Callback ex m a n)) -> ((SNat :: SNat n) :=> c))
         callbacks
 
--- | Executes a callback given a dmap, switching integer and BS. User
--- must ensure that there is a callback that can be called, otherwise
--- (in case of lookup failure) this function will "error".
-runCallbacks :: [CallbackWrapper m a] -> SNat n -> ByteString -> m a
-runCallbacks cbs sn bs =
+-- | Executes a callback given a dmap, message tag and BS. User must
+-- ensure that there is a callback that can be called, otherwise (in
+-- case of lookup failure) this function will return Nothing.
+runCallbacks :: Monad m => [CallbackWrapper ex m a] -> SNat n -> ByteString -> ex -> m (Maybe a)
+runCallbacks cbs sn bs ex =
     case D.lookup sn dmap of
-      Just (Callback x) -> x (Tagged bs)
-      Nothing           -> error "runCallback: lookup in DMap failed"
+      Just (Callback x) -> Just <$> x ex (Tagged bs)
+      Nothing           -> pure Nothing
   where
     dmap = createDMap cbs
 
--- | Same as 'runCallback', but accepts value-level integer.
-runCallbacksInt :: [CallbackWrapper m a] -> Integer -> ByteString -> m a
-runCallbacksInt cbs i bs =
-    reifyNat i $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs
-
-----------------------------------------------------------------------------
--- Testing
-----------------------------------------------------------------------------
-
-data Msg1 = Msg1 String
-data Msg2 = Msg2 Integer
-data Msg3 = Msg3 Double
-
-instance Serialise Msg1 where
-    encode = error "test"
-    decode = pure $ Msg1 "wow,parsed)))"
-instance Serialise Msg2 where
-    encode = error "test"
-    decode = pure $ Msg2 10
-instance Serialise Msg3 where
-    encode = error "test"
-    decode = pure $ Msg3 1.2345
-
-instance Message Msg1 where type MsgTag Msg1 = 1
-instance Message Msg2 where type MsgTag Msg2 = 2
--- it's an error if you put "2" here, thanks to injective type families
-instance Message Msg3 where type MsgTag Msg3 = 3
-
-_test :: IO ()
-_test = do
-    let create foo = handlerDecoded $ either (const $ putText "can't parse") foo
-    let r1 = create $ \(Msg1 s) -> putStrLn s
-    let r2 = create $ \(Msg2 i) -> putText "wat?" >> print (i + 1)
-    runCallbacksInt [r1,r2] 2 "aoeu"
+-- | Same as 'runCallback', but accepts value-level natural number.
+runCallbacksInt :: Monad m => [CallbackWrapper ex m a] -> Natural -> ByteString -> ex -> m (Maybe a)
+runCallbacksInt cbs i bs ex =
+    reifyNat (toInteger i) $ \(Proxy :: Proxy n) -> runCallbacks cbs (SNat :: SNat n) bs ex

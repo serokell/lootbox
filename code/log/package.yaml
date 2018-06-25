@@ -9,8 +9,8 @@ library:
     - aeson
     - caps
     - dlist
-    - ether
     - fmt
+    - loot-base
     - lens
     - log-warper
     - mtl
