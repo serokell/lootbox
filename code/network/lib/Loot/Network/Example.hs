@@ -75,8 +75,9 @@ runZMQ nId server client = do
     withZTGlobalEnv logging $ \ztEnv -> do
         cliEnv <- createNetCliEnv ztEnv mempty
         servEnv <- createNetServEnv ztEnv nId
-        flip runReaderT (BigState cliEnv servEnv ztEnv) $ do
-            void $ A.concurrently server client
+        let action = flip runReaderT (BigState cliEnv servEnv ztEnv) $
+                     void $ A.concurrently server client
+        action `finally` (termNetCliEnv cliEnv >> termNetServEnv servEnv)
 
 testZmq :: IO ()
 testZmq = do

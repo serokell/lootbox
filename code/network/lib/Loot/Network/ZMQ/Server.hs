@@ -5,11 +5,13 @@
 -- | Server-side logic.
 
 module Loot.Network.ZMQ.Server
-       ( ZTCliId (..)
-       , ServRequestQueue
-       , ZTListenerEnv
-       , ZTNetServEnv (..)
+       ( ZTNetServEnv (..)
        , createNetServEnv
+
+       , ZTListenerEnv
+       , ServRequestQueue
+       , ZTCliId (..)
+       , termNetServEnv
        , runBroker
        , registerListener
        ) where
@@ -87,6 +89,7 @@ data ZTNetServEnv = ZTNetServEnv
       -- ^ Logging function from global context.
     }
 
+-- | Creates server environment.
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
 createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
     ztServFront <- Z.socket ctx Z.Router
@@ -102,6 +105,12 @@ createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
 
     let ztServLogging = ztLogging & logNameSelL . _GivenName %~ (<> "serv")
     pure ZTNetServEnv {..}
+
+-- | Terminates server environment.
+termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
+termNetServEnv ZTNetServEnv{..} = liftIO $ do
+    Z.close ztServFront
+    Z.close ztServPub
 
 data ServBrokerStmRes
     = SBListener ListenerId ZTServSendMsg

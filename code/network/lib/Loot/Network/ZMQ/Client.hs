@@ -1,12 +1,12 @@
 {-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- method naming is HORRIBLE, i hope to fix it later
 -- | ZMQ Client implementation.
 
 module Loot.Network.ZMQ.Client
     ( ZTNetCliEnv (..)
     , createNetCliEnv
+    , termNetCliEnv
     , ZTClientEnv
     , CliRequestQueue
     , ZTUpdatePeersReq
@@ -172,11 +172,11 @@ data ZTNetCliEnv = ZTNetCliEnv
       -- ^ Logging function from global context.
     }
 
+-- | Creates client environment.
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
-    -- I guess it's alright to connect ROUTER instead of binding it.
-    -- https://stackoverflow.com/questions/16109139/zmq-when-to-use-zmq-bind-or-zmq-connect
     ztCliBack <- Z.socket ctx Z.Router
+    Z.setLinger (Z.restrict 0) ztCliBack
     forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
@@ -194,6 +194,12 @@ createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     let cliEnv = ZTNetCliEnv {..}
     changePeers cliEnv $ def & uprAdd .~ peers
     pure cliEnv
+
+-- | Terminates client environment.
+termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
+termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
+    Z.close ztCliBack
+    Z.close ztCliSub
 
 changePeers :: MonadIO m => ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
 changePeers ZTNetCliEnv{..} req = liftIO $ do
