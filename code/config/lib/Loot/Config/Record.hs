@@ -33,6 +33,7 @@ module Loot.Config.Record
        , ItemType
 
        , finalise
+       , complement
 
        , HasOption
        , option
@@ -165,6 +166,18 @@ finalise = toEither . finalise' ""
       <$> (ItemSub <$> finalise' (prf <> itemSubLabel item <> ".") rec)
       <*> finalise' prf xs
 
+-- | Fill values absent in one config with values from another config.
+-- Useful when total config of default values exists.
+complement
+    :: ConfigRec 'Partial is
+    -> ConfigRec 'Final is
+    -> ConfigRec 'Final is
+complement RNil RNil
+    = RNil
+complement (ItemOptionP opt :& ps) (ItemOptionF sup :& fs)
+    = ItemOptionF (fromMaybe sup opt) :& complement ps fs
+complement (ItemSub part :& ps) (ItemSub final :& fs)
+    = ItemSub (complement part final) :& complement ps fs
 
 -----------------------
 -- Configuration lenses
