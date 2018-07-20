@@ -41,7 +41,7 @@ module Loot.Config.Record
        , sub
        ) where
 
-import Data.Validation (AccValidation (AccFailure, AccSuccess), toEither)
+import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
 import Data.Vinyl.Lens (RecElem, rlens)
 import Data.Vinyl.TypeLevel (RIndex)
@@ -150,15 +150,15 @@ finalise = toEither . finalise' ""
     finalise' :: forall gs. LabelsKnown gs
               => String                 -- ^ Option name prefix
               -> ConfigRec 'Partial gs
-              -> AccValidation [String] (ConfigRec 'Final gs)
+              -> Validation [String] (ConfigRec 'Final gs)
     finalise' _ RNil = pure RNil
     finalise' prf (ItemOptionP (Just x) :& xs)
         = (:&)
-      <$> AccSuccess (ItemOptionF x)
+      <$> Success (ItemOptionF x)
       <*> finalise' prf xs
     finalise' prf (item@(ItemOptionP Nothing) :& xs)
         = (:&)
-      <$> AccFailure [prf <> itemOptionLabel item]
+      <$> Failure [prf <> itemOptionLabel item]
       <*> finalise' prf xs
     finalise' prf (item@(ItemSub rec) :& xs)
         = (:&)
