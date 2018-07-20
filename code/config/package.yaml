@@ -8,6 +8,7 @@ library:
   dependencies:
     - aeson
     - aeson-better-errors
+    - data-default
     - microlens
     - validation
     - vinyl

@@ -43,6 +43,7 @@ module Loot.Config.Record
        ) where
 
 import Data.Validation (Validation (Failure, Success), toEither)
+import Data.Default (Default (..))
 import Data.Vinyl (Label, Rec ((:&), RNil))
 import Data.Vinyl.Lens (RecElem, rlens)
 import Data.Vinyl.TypeLevel (RIndex)
@@ -265,3 +266,18 @@ instance
   where
     mempty = ItemSub mempty
     mappend = (<>)
+
+instance Default (ConfigRec k '[]) where
+    def = RNil
+
+-- | Values are missing by default.
+instance
+    ( Default (ConfigRec 'Partial is)
+    ) => Default (ConfigRec 'Partial ((i ::: t) : is)) where
+    def = ItemOptionP Nothing :& def
+
+instance
+    ( Default (ConfigRec k t)
+    , Default (ConfigRec k is)
+    ) => Default (ConfigRec k ((i ::< t) : is)) where
+    def = ItemSub def :& def
