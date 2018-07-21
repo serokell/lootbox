@@ -33,6 +33,7 @@ module Loot.Config.Record
        , ItemType
 
        , finalise
+       , complement
 
        , HasOption
        , option
@@ -42,6 +43,7 @@ module Loot.Config.Record
        ) where
 
 import Data.Validation (Validation (Failure, Success), toEither)
+import Data.Default (Default (..))
 import Data.Vinyl (Label, Rec ((:&), RNil))
 import Data.Vinyl.Lens (RecElem, rlens)
 import Data.Vinyl.TypeLevel (RIndex)
@@ -165,6 +167,18 @@ finalise = toEither . finalise' ""
       <$> (ItemSub <$> finalise' (prf <> itemSubLabel item <> ".") rec)
       <*> finalise' prf xs
 
+-- | Fill values absent in one config with values from another config.
+-- Useful when total config of default values exists.
+complement
+    :: ConfigRec 'Partial is
+    -> ConfigRec 'Final is
+    -> ConfigRec 'Final is
+complement RNil RNil
+    = RNil
+complement (ItemOptionP opt :& ps) (ItemOptionF sup :& fs)
+    = ItemOptionF (fromMaybe sup opt) :& complement ps fs
+complement (ItemSub part :& ps) (ItemSub final :& fs)
+    = ItemSub (complement part final) :& complement ps fs
 
 -----------------------
 -- Configuration lenses
@@ -252,3 +266,18 @@ instance
   where
     mempty = ItemSub mempty
     mappend = (<>)
+
+instance Default (ConfigRec k '[]) where
+    def = RNil
+
+-- | Values are missing by default.
+instance
+    ( Default (ConfigRec 'Partial is)
+    ) => Default (ConfigRec 'Partial ((i ::: t) : is)) where
+    def = ItemOptionP Nothing :& def
+
+instance
+    ( Default (ConfigRec k t)
+    , Default (ConfigRec k is)
+    ) => Default (ConfigRec k ((i ::< t) : is)) where
+    def = ItemSub def :& def
