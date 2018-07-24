@@ -1,10 +1,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds     #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE TypeOperators       #-}
 
 -- | Basic "has" lenses, extracted from the 'ether' package.
 module Loot.Base.HasLens
     ( HasLens(..)
     , HasLens'
+    , HasLenses
     ) where
 
 import Data.Coerce (coerce)
@@ -20,3 +24,7 @@ instance HasLens t (Tagged t a) a where
     lensOf = \f -> fmap coerce . f . coerce
 
 type HasLens' s a = HasLens a s a
+
+type family HasLenses s as :: Constraint where
+    HasLenses s '[] = ()
+    HasLenses s (a : as) = (HasLens' s a, HasLenses s as)
