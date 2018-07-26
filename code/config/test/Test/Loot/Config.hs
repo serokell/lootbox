@@ -211,3 +211,5 @@ unit_finalise = do
 
             finalCfg ^. (lensOf @SomeKek) @=? (SomeKek 999)
             finalCfg ^. (lensOf @SomeMem) @=? (SomeMem "bye")
+            finalCfg ^. (lensOfC @('["kek"])) @=? (SomeKek 999)
+            finalCfg ^. (lensOfC @('["sub", "sub2", "mem"])) @=? (SomeMem "bye")

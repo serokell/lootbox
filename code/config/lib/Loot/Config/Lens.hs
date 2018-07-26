@@ -1,20 +1,17 @@
+{-# LANGUAGE AllowAmbiguousTypes  #-}
 {-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE GADTs                #-}
-{-# LANGUAGE KindSignatures       #-}
-{-# LANGUAGE OverloadedLabels     #-}
 {-# LANGUAGE PolyKinds            #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | This module provides orphan instance HasLens for config.
-module Loot.Config.HasLens  where
+-- | This module provides different lens-related types and helpers.
+module Loot.Config.Lens
+    ( HasLensC
+    , lensOfC
+    ) where
 
 import Data.Vinyl (Label (..))
 import GHC.TypeLits (ErrorMessage (Text), Symbol, TypeError)
@@ -71,23 +68,27 @@ type family LabelOfType (f :: Type) labels cont (is :: [ItemKind]) :: [SymPathEl
 type family LabelOfTypeS f is where
     LabelOfTypeS f is = RevList (LabelOfType f '[] '[] is)
 
+type family IntroduceSym (f :: [Symbol]) :: [SymPathElem] where
+    IntroduceSym '[x] = '[ 'SOption x ]
+    IntroduceSym (x ': xs) = 'SSub x ': IntroduceSym xs
+
 ----------------------------------------------------------------------------
 -- Lenses for records
 ----------------------------------------------------------------------------
 
 class HierarchyLens (path :: [SymPathElem]) is v where
-    hlens :: Proxy path -> Lens' (ConfigRec 'Final is) v
+    hlens :: Lens' (ConfigRec 'Final is) v
 
 instance (HasOption l is v) =>
          HierarchyLens ('SOption l ': lx) is v where
 
-    hlens _ = option (Label :: Label l)
+    hlens = option (Label :: Label l)
 
 instance (HasSub l is us, HierarchyLens lx us v) =>
          HierarchyLens ('SSub l ': lx) is v where
 
-    hlens _ = sub (Label :: Label l) .
-              (hlens (Proxy :: Proxy lx) :: Lens' (ConfigRec 'Final us) v)
+    hlens = sub (Label :: Label l) .
+            (hlens @lx :: Lens' (ConfigRec 'Final us) v)
 
 ----------------------------------------------------------------------------
 -- HasLens Instance
@@ -98,4 +99,13 @@ instance
          , HierarchyLens (LabelOfTypeS v is) is v
          ) =>
          HasLens v (ConfigRec 'Final is) v where
-    lensOf = hlens (Proxy :: Proxy (LabelOfTypeS v is))
+    lensOf = hlens @(LabelOfTypeS v is)
+
+-- | Like 'HasLens', but with record key.
+type HasLensC path is v = HierarchyLens (IntroduceSym path) is v
+
+-- | It's like 'lensOf', but returns the value by item's key (path).
+lensOfC ::
+       forall path is v. HasLensC path is v
+    => Lens' (ConfigRec 'Final is) v
+lensOfC = hlens @(IntroduceSym path)
