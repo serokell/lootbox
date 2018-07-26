@@ -4,11 +4,13 @@
  -}
 
 {-# LANGUAGE DataKinds     #-}
+{-# LANGUAGE TypeFamilies  #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Test.Loot.Config where
 
-import Data.Aeson (eitherDecode)
+import Data.Aeson (FromJSON, eitherDecode)
+import Loot.Base.HasLens (lensOf)
 
 import Loot.Config
 
@@ -18,10 +20,13 @@ import Test.Tasty.HUnit (Assertion, assertFailure, (@=?))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
+newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Generic,FromJSON)
+newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,Generic,FromJSON)
 
 type Fields = '[ "str" ::: String
                , "int" ::: Int
                , "sub" ::< SubFields
+               , "kek" ::: SomeKek
                ]
 
 type SubFields = '[ "int2" ::: Int
@@ -30,6 +35,7 @@ type SubFields = '[ "int2" ::: Int
                   ]
 
 type Sub2Fields = '[ "str2" ::: String
+                   , "mem"  ::: SomeMem
                    ]
 
 cfg :: PartialConfig Fields
@@ -39,7 +45,7 @@ cfg = mempty
 unit_emptyPartial :: Assertion
 unit_emptyPartial = do
     let s :: Text
-        s = "{str <unset>, int <unset>, sub =< {int2 <unset>, bool <unset>, sub2 =< {str2 <unset>}}}"
+        s = "{str <unset>, int <unset>, sub =< {int2 <unset>, bool <unset>, sub2 =< {str2 <unset>, mem <unset>}}, kek <unset>}"
     s @=? show cfg
 
 
@@ -159,6 +165,8 @@ unit_finaliseEmpty =
         [ "str", "int"
         , "sub.int2", "sub.bool"
         , "sub.sub2.str2"
+        , "sub.sub2.mem"
+        , "kek"
         ]
 
 unit_finaliseSome :: Assertion
@@ -166,27 +174,42 @@ unit_finaliseSome = do
     let cfg1 = cfg & option #str ?~ "hi"
                    & sub #sub . option #bool ?~ False
                    & sub #sub . sub #sub2 . option #str2 ?~ ""
+                   & option #kek ?~ (SomeKek 1)
     Left missing @=? finalise cfg1
   where
     missing =
         [ "int"
         , "sub.int2"
+        , "sub.sub2.mem"
         ]
+
+fullConfig :: ConfigRec 'Partial Fields
+fullConfig =
+    cfg & option #str ?~ "hey"
+        & option #int ?~ 12345
+        & option #kek ?~ (SomeKek 999)
+        & sub #sub . option #bool ?~ False
+        & sub #sub . option #int2 ?~ 13579
+        & sub #sub . sub #sub2 . option #str2 ?~ ""
+        & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "bye")
 
 unit_finalise :: Assertion
 unit_finalise = do
-    let cfg1 = cfg & option #str ?~ "hey"
-                   & option #int ?~ 12345
-                   & sub #sub . option #bool ?~ False
-                   & sub #sub . option #int2 ?~ 13579
-                   & sub #sub . sub #sub2 . option #str2 ?~ ""
+    let cfg1 = fullConfig
     let efinalCfg = finalise cfg1
 
     case efinalCfg of
         Left _ -> assertFailure "Valid config was not finalised properly"
         Right finalCfg -> do
-            "hey" @=? finalCfg ^. option #str
-            12345 @=? finalCfg ^. option #int
-            False @=? finalCfg ^. sub #sub . option #bool
-            13579 @=? finalCfg ^. sub #sub . option #int2
-            ""    @=? finalCfg ^. sub #sub . sub #sub2 . option #str2
+            "hey"           @=? finalCfg ^. option #str
+            12345           @=? finalCfg ^. option #int
+            (SomeKek 999)   @=? finalCfg ^. option #kek
+            False           @=? finalCfg ^. sub #sub . option #bool
+            13579           @=? finalCfg ^. sub #sub . option #int2
+            ""              @=? finalCfg ^. sub #sub . sub #sub2 . option #str2
+            (SomeMem "bye") @=? finalCfg ^. sub #sub . sub #sub2 . option #mem
+
+            finalCfg ^. (lensOf @SomeKek) @=? (SomeKek 999)
+            finalCfg ^. (lensOf @SomeMem) @=? (SomeMem "bye")
+            finalCfg ^. (lensOfC @('["kek"])) @=? (SomeKek 999)
+            finalCfg ^. (lensOfC @('["sub", "sub2", "mem"])) @=? (SomeMem "bye")

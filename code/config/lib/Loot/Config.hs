@@ -9,6 +9,7 @@
 -- | Flexible and convenient configuration framework.
 module Loot.Config
        ( module Loot.Config.Record
+       , module Loot.Config.Lens
 
        , Config
        , PartialConfig
@@ -18,6 +19,7 @@ module Loot.Config
 
 import Lens.Micro ((?~))
 
+import Loot.Config.Lens
 import Loot.Config.Record ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, finalise, option,
                            sub)
 import Loot.Config.Yaml ()
