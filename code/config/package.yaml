@@ -9,6 +9,7 @@ library:
     - aeson
     - aeson-better-errors
     - data-default
+    - loot-base
     - microlens
     - validation
     - vinyl
@@ -18,6 +19,7 @@ tests:
     <<: *test-common
 
     dependencies:
+      - loot-base
       - loot-config
 
       - hedgehog
