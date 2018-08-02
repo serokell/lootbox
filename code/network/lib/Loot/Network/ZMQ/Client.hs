@@ -143,32 +143,32 @@ type ZTClientEnv = BiTQueue (ZTNodeId, CliRecvMsg) (Maybe ZTNodeId, (MsgType, Co
 -- (main client worker).
 data ZTNetCliEnv = ZTNetCliEnv
     {
-      ztCliBack         :: Z.Socket Z.Router
+      ztCliBack         :: !(Z.Socket Z.Router)
       -- ^ Backend which receives data from the network and routes it
       -- to client workers.
-    , ztCliSub          :: Z.Socket Z.Sub
+    , ztCliSub          :: !(Z.Socket Z.Sub)
       -- ^ Subscriber socket which is listening to other nodes'
       -- updates. It also sends data to clients .
 
-    , ztPeers           :: TVar (Set ZTNodeId)
+    , ztPeers           :: !(TVar (Set ZTNodeId))
       -- ^ List of peers we are connected to. Is to be updated by the
       -- main thread only (broker worker).
-    , ztHeartbeatInfo   :: TVar (Map ZTNodeId HBState)
+    , ztHeartbeatInfo   :: !(TVar (Map ZTNodeId HBState))
       -- ^ Information about connection and current heartbeating
       -- state.
 
-    , ztClients         :: TVar (Map ClientId ZTClientEnv)
+    , ztClients         :: !(TVar (Map ClientId ZTClientEnv))
       -- ^ Channels binding broker to clients, map from client name to.
-    , ztSubscriptions   :: TVar (Map Subscription (Set ClientId))
+    , ztSubscriptions   :: !(TVar (Map Subscription (Set ClientId)))
       -- ^ Map from subscription key to clents' identifiers.
-    , ztMsgTypes        :: TVar (Map MsgType ClientId)
+    , ztMsgTypes        :: !(TVar (Map MsgType ClientId))
       -- ^ Map from msg type key to clents' identifiers.
 
-    , ztCliRequestQueue :: CliRequestQueue
+    , ztCliRequestQueue :: !(CliRequestQueue)
       -- ^ Queue to read (internal, administrative) client requests
       -- from, like updating peers or resetting connection.
 
-    , ztCliLogging      :: Logging IO
+    , ztCliLogging      :: !(Logging IO)
       -- ^ Logging function from global context.
     }
 
@@ -180,8 +180,8 @@ createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
-    Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
     forM_ peers $ Z.connect ztCliSub . ztNodeIdPub
+    Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
 
     ztClients <- newTVarIO mempty
     ztPeers <- newTVarIO mempty
@@ -189,11 +189,12 @@ createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
+    -- Peers will be added by the server itself
+    atomically $ TQ.writeTQueue (unCliRequestQueue ztCliRequestQueue) $
+        IRUpdatePeers $ def & uprAdd .~ peers
 
     let ztCliLogging = ztLogging & logNameSelL . _GivenName %~ (<> "cli")
-    let cliEnv = ZTNetCliEnv {..}
-    changePeers cliEnv $ def & uprAdd .~ peers
-    pure cliEnv
+    pure $ ZTNetCliEnv {..}
 
 -- | Terminates client environment.
 termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
@@ -217,15 +218,17 @@ changePeers ZTNetCliEnv{..} req = liftIO $ do
             foldr (.) id (map (\nId -> at nId .~ Just initHbs) (Set.toList toAdd))
         pure (toAdd,toDel)
     forM_ toDisconnect $ \z -> do
+        ztLog ztCliLogging Debug $ "changePeers: disconnecting " <> show z
         Z.disconnect ztCliBack $ ztNodeIdRouter z
         Z.disconnect ztCliSub $ ztNodeIdPub z
     forM_ toConnect $ \z -> do
+        ztLog ztCliLogging Debug $ "changePeers: connecting " <> show z
         Z.connect ztCliBack $ ztNodeIdRouter z
         Z.connect ztCliSub $ ztNodeIdPub z
 
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
-    ztLog ztCliLogging Info $ "Reconnecting peers: " <> show nIds
+    ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
 
     forM_ nIds $ \nId -> do
         Z.disconnect ztCliBack (ztNodeIdRouter nId)
@@ -309,10 +312,9 @@ runBroker = do
                         in foldl' (\prevMap sub -> Map.alter insertClientId sub prevMap) s subs
 
                     pure newSubs
-                case res of
-                    Left e        -> error $ "Client IRRegister: " <> e
-                    Right newSubs -> forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
-                ztCliLog Debug $ "Registered client " <> show clientId
+                let newSubs = either (\e -> error $ "Client IRRegister: " <> e) identity res
+                forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
+                ztCliLog Debug $ "Registered client " <> show clientId <> " subs " <> show newSubs
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- maybe choosePeer pure nodeIdM

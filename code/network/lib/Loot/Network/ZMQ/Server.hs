@@ -67,25 +67,25 @@ type ZTListenerEnv = BiTQueue (ZTCliId, MsgType, Content) ZTServSendMsg
 
 -- | A context for the broker, essentially.
 data ZTNetServEnv = ZTNetServEnv
-    { ztOurNodeId        :: ZTNodeId
+    { ztOurNodeId        :: !ZTNodeId
       -- ^ Our identifier, in case we need it to send someone
       -- explicitly (e.g. when PUBlishing).
-    , ztServFront        :: Z.Socket Z.Router
+    , ztServFront        :: !(Z.Socket Z.Router)
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
-    , ztServPub          :: Z.Socket Z.Pub
+    , ztServPub          :: !(Z.Socket Z.Pub)
       -- ^ Publishing socket. For publishing.
 
-    , ztListeners        :: TVar (Map ListenerId ZTListenerEnv)
+    , ztListeners        :: !(TVar (Map ListenerId ZTListenerEnv))
       -- ^ Information about listeners, map from id to info. Id
       -- inside info must match the map key.
-    , ztMsgTypes         :: TVar (Map MsgType ListenerId)
+    , ztMsgTypes         :: !(TVar (Map MsgType ListenerId))
       -- ^ Income message types listeners work with.
 
-    , ztServRequestQueue :: ServRequestQueue
+    , ztServRequestQueue :: !ServRequestQueue
       -- ^ Request queue for server.
 
-    , ztServLogging      :: Logging IO
+    , ztServLogging      :: !(Logging IO)
       -- ^ Logging function from global context.
     }
 
