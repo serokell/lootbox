@@ -372,31 +372,44 @@ runBroker = do
                                     "message for key " <> show k
             other -> ztCliLog Warning $ "subToClients: wrong format: " <> show other
 
-    liftIO $ A.withAsync (heartbeatWorker cEnv) $ const $ forever $ do
-        results <- atomically $ do
-            cMap <- readTVar ztClients
-            let readReq =
-                    fmap CBRequest <$>
-                    TQ.tryReadTQueue (unCliRequestQueue ztCliRequestQueue)
-            let readClient :: [STM (Maybe CliBrokerStmRes)]
-                readClient =
-                    map (\(cliId,biq) ->
-                            fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
-                            TQ.tryReadTQueue (bSendQ biq))
-                        (Map.toList cMap)
-            let boolToMaybe t = bool Nothing (Just t)
-            atLeastOne $ NE.fromList $
-                [ readReq
-                , boolToMaybe CBSub <$> adapterTry ztCliSubAdapter
-                , boolToMaybe CBBack <$> adapterTry ztCliBackAdapter
-                ] ++ readClient
-        forM_ results $ \case
-            CBRequest r             -> processReq r
-            CBClient _cId nIdM cont -> clientToBackend nIdM cont
-            CBBack                  -> whileM (canReceive ztCliBack) $
-                                       Z.receiveMulti ztCliBack >>= backendToClients
-            CBSub                   -> whileM (canReceive ztCliSub) $
-                                       Z.receiveMulti ztCliSub >>= subToClients
+    liftIO $ A.withAsync (heartbeatWorker cEnv) $ const $ do
+      let receiveBack = whileM (canReceive ztCliBack) $
+                        Z.receiveMulti ztCliBack >>= backendToClients
+      let receiveSub  = whileM (canReceive ztCliSub) $
+                        Z.receiveMulti ztCliSub >>= subToClients
+      let action = do
+              results <- atomically $ do
+                  cMap <- readTVar ztClients
+                  let readReq =
+                          fmap CBRequest <$>
+                          TQ.tryReadTQueue (unCliRequestQueue ztCliRequestQueue)
+                  let readClient :: [STM (Maybe CliBrokerStmRes)]
+                      readClient =
+                          map (\(cliId,biq) ->
+                                  fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
+                                  TQ.tryReadTQueue (bSendQ biq))
+                              (Map.toList cMap)
+                  let boolToMaybe t = bool Nothing (Just t)
+                  atLeastOne $ NE.fromList $
+                      [ readReq
+                      , boolToMaybe CBSub <$> adapterTry ztCliSubAdapter
+                      , boolToMaybe CBBack <$> adapterTry ztCliBackAdapter
+                      ] ++ readClient
+              forM_ results $ \case
+                  CBRequest r             -> processReq r
+                  CBClient _cId nIdM cont -> clientToBackend nIdM cont
+                  CBBack                  -> receiveBack
+                  CBSub                   -> receiveSub
+
+      -- DSCP-177 Sockets must be processed at least once in the beginning
+      -- for 'threadWaitRead' to function correctly later. This is not a
+      -- solution, but a workaround -- I haven't managed to find the
+      -- explanatian of why does it happen (@volhovm).
+      receiveBack
+      receiveSub
+
+      forever action `catchAny`
+          (\e -> ztCliLog Warning $ "Client broker exited: " <> show e)
 
 ----------------------------------------------------------------------------
 -- Methods

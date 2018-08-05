@@ -127,7 +127,6 @@ testZmq = do
                     x <- atomically $ recvBtq biQ
                     log $ "subreader: got " <> show x
 
-            liftIO $ threadDelay 1000000 -- wait for the server to start
             withZMQ "n2" n2 (Set.singleton n1) runServer $ do
                 log "client: *starting*"
                 -- biq2 is also subscribed to blocks but will discard them, just to test

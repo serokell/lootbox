@@ -197,7 +197,8 @@ runBroker = do
                   SBListener _lId msg -> processMsg msg
                   SBFront             -> whileM (canReceive ztServFront) $
                                          Z.receiveMulti ztServFront >>= frontToListener
-      forever action
+      forever action `catchAny`
+          (\e -> ztLog ztServLogging Warning $ "Server broker exited: " <> show e)
 
 registerListener ::
        (MonadReader r m, MonadIO m)
