@@ -6,14 +6,18 @@
 -- ZMQ sockets.
 
 module Loot.Network.ZMQ.Adapter
-       ( atLeastOne
-       , threadWaitReadSTMLong
-       , socketWaitReadSTMLong
+       ( SocketAdapter
+       , newSocketAdapter
+       , adapterRelease
+       , adapterWait
+       , adapterTry
+
+       , atLeastOne
        , canReceive
        ) where
 
 import Control.Concurrent.Async as A
-import Control.Concurrent.STM.TMVar (newTMVarIO, putTMVar, readTMVar, swapTMVar, takeTMVar,
+import Control.Concurrent.STM.TMVar (TMVar, newTMVarIO, putTMVar, readTMVar, swapTMVar, takeTMVar,
                                      tryReadTMVar)
 import Control.Monad.STM (retry)
 import Data.List.NonEmpty as NE
@@ -21,17 +25,13 @@ import qualified GHC.Conc.IO as G
 import System.Posix.Types (Fd)
 import qualified System.ZMQ4 as Z
 
--- | Given a set of STM actions, returns all that succeed if at least
--- one does.
-atLeastOne :: NonEmpty (STM (Maybe a)) -> STM (NonEmpty a)
-atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
-    [] -> retry
-    x:xs -> pure $ x :| xs
+-- | Socket-related type that adapts it to STM-style polling.
+data SocketAdapter = SocketAdapter (TMVar Bool) (A.Async ())
 
 -- | Produces stm action corresponding to the action "lock until it is
 -- possible to read from the socket". It doesn't guarantee that there
 -- is actually any data to read from it.
-threadWaitReadSTMLong :: Fd -> IO (STM (), STM Bool, IO ())
+threadWaitReadSTMLong :: Fd -> IO (TMVar Bool, A.Async ())
 threadWaitReadSTMLong fd = do
     -- Bool value inside indicates who should take action now. If it's
     -- false, it's updater thread, if it's true it's main wait thread.
@@ -46,25 +46,46 @@ threadWaitReadSTMLong fd = do
             else retry
         G.threadWaitRead fd
         atomically $ putTMVar m True
-    let waitAction = do
-            v <- readTMVar m
-            if v == True
-            then void (swapTMVar m False) -- We now pass flag to another thread
-            else retry                    -- Another thread haven't yet taken the lock
-    let tryAction =
-            tryReadTMVar m >>= \case
-                Nothing -> pure False -- updater thread is blocking
-                Just False -> pure False -- content has already been taken
-                Just True -> True <$ void (swapTMVar m False)
-    let killAction = A.cancel t
-    return (waitAction, tryAction, killAction)
+    pure (m, t)
 
--- | 'threadWaitReadSTMLong' adapted for sockets.
-socketWaitReadSTMLong :: (MonadIO m) => Z.Socket t -> m (STM (), STM Bool, m ())
-socketWaitReadSTMLong s = liftIO $ do
+-- | Create new socket adapter.
+newSocketAdapter :: MonadIO m => Z.Socket t -> m SocketAdapter
+newSocketAdapter s = liftIO $ do
     fd <- Z.fileDescriptor s
-    (stmWait, stmTry, destroy) <- threadWaitReadSTMLong fd
-    pure (stmWait, stmTry, liftIO destroy)
+    (m, t) <- threadWaitReadSTMLong fd
+    pure $ SocketAdapter m t
+
+-- | Release socket adapter.
+adapterRelease :: MonadIO m => SocketAdapter -> m ()
+adapterRelease (SocketAdapter _ t) = liftIO $ A.cancel t
+
+-- | Wait until any message comes to the socket.
+adapterWait :: SocketAdapter -> STM ()
+adapterWait (SocketAdapter m _) = do
+    v <- readTMVar m
+    if v == True
+    then void (swapTMVar m False) -- We now pass flag to another thread
+    else retry                    -- Another thread haven't yet taken the lock
+
+-- | Check if there are any messages can be read from socket.
+adapterTry :: SocketAdapter -> STM Bool
+adapterTry (SocketAdapter m _) =
+    tryReadTMVar m >>= \case
+        Nothing -> pure False -- updater thread is blocking
+        Just False -> pure False -- content has already been taken
+        Just True -> True <$ void (swapTMVar m False)
+
+----------------------------------------------------------------------------
+-- Helpers
+----------------------------------------------------------------------------
+
+-- | Given a set of STM actions, returns all that succeed if at least
+-- one does.
+atLeastOne :: NonEmpty (STM (Maybe a)) -> STM (NonEmpty a)
+atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
+    [] -> retry
+    x:xs -> pure $ x :| xs
+
 
 -- | Checks if data can be received from the socket. Use @whileM
 -- canReceive process@ pattern after the STM action on the needed

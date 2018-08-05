@@ -11,6 +11,7 @@ import qualified Control.Concurrent.Async.Lifted as A
 import Control.Lens (makeLenses)
 import Data.Default (def)
 import qualified Data.Set as Set
+import Loot.Log.Internal (Name)
 import System.IO.Unsafe (unsafePerformIO)
 
 import Loot.Base.HasLens (HasLens (..))
@@ -68,16 +69,18 @@ log :: MonadIO m => Text -> m ()
 log x = do
     liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
 
-runZMQ :: ZTNodeId -> Env () -> Env () -> IO ()
-runZMQ nId server client = do
-    let logFoo l n t = putTextLn $ "[" <> show l <> "] " <> show n <> ": " <> t
-    let logging = Logging logFoo (pure $ GivenName "network")
+withZMQ :: Name -> ZTNodeId -> Set ZTNodeId -> Env () -> Env () -> IO ()
+withZMQ name nId peers server action = do
+    let logFoo l n t = log $ "[" <> show l <> "] " <> show n <> ": " <> t
+    let logging = Logging logFoo (pure $ GivenName name)
     withZTGlobalEnv logging $ \ztEnv -> do
-        cliEnv <- createNetCliEnv ztEnv mempty
+        cliEnv <- createNetCliEnv ztEnv peers
         servEnv <- createNetServEnv ztEnv nId
-        let action = flip runReaderT (BigState cliEnv servEnv ztEnv) $
-                     void $ A.concurrently server client
-        action `finally` (termNetCliEnv cliEnv >> termNetServEnv servEnv)
+        let execute = flip runReaderT (BigState cliEnv servEnv ztEnv) $
+                      void $ A.withAsync server $ const $
+                      void $ A.withAsync runClient $ const $
+                      action
+        execute `finally` (termNetCliEnv cliEnv >> termNetServEnv servEnv)
 
 testZmq :: IO ()
 testZmq = do
@@ -103,14 +106,11 @@ testZmq = do
                         threadDelay 10000000
                         log "server: *restarting*"
                     runServer @ZmqTcp
-            let server = do
-                    biQ1 <- registerListener @ZmqTcp "ponger" (Set.fromList ["ping"])
-                    biQ2 <- registerListener @ZmqTcp "publisher" mempty
-                    void $ A.concurrently_ (runPonger biQ1) $
-                           A.concurrently_ (runPublisher biQ2) $
-                           servWithCancel
-            log "server: *starting*"
-            runZMQ n1 server pass
+            withZMQ "n1" n1 mempty servWithCancel $ do
+                log "server: *starting*"
+                biQ1 <- registerListener @ZmqTcp "ponger" (Set.fromList ["ping"])
+                biQ2 <- registerListener @ZmqTcp "publisher" mempty
+                void $ A.concurrently_ (runPonger biQ1) (runPublisher biQ2)
     let node2 = do
             let runPinger biQ = forever $ do
                     log "pinger: sending"
@@ -126,22 +126,22 @@ testZmq = do
             let runSubreader biQ = forever $ do
                     x <- atomically $ recvBtq biQ
                     log $ "subreader: got " <> show x
-            let client = do
-                    -- biq2 is also subscribed to blocks but will discard them, just to test
-                    -- that subs are propagated properly
-                    biQ1 <- registerClient @ZmqTcp "pinger" (Set.fromList ["pong"])
-                                (Set.singleton (Subscription "block"))
-                    biQ2 <- registerClient @ZmqTcp
-                                "subreader"
-                                mempty
-                                (Set.singleton (Subscription "block"))
-                    updatePeers @ZmqTcp $ def & uprAdd .~ (Set.singleton n1)
-                    void $ A.concurrently_ (runPinger biQ1) $
-                           A.concurrently_ (runSubreader biQ2) $
-                           (runClient @ZmqTcp)
+
             liftIO $ threadDelay 1000000 -- wait for the server to start
-            log "client: *starting*"
-            runZMQ n2 pass client
-    void $ A.concurrently node1 node2
+            withZMQ "n2" n2 (Set.singleton n1) runServer $ do
+                log "client: *starting*"
+                -- biq2 is also subscribed to blocks but will discard them, just to test
+                -- that subs are propagated properly
+                biQ1 <- registerClient @ZmqTcp "pinger" (Set.fromList ["pong"])
+                            (Set.singleton (Subscription "block"))
+                biQ2 <- registerClient @ZmqTcp
+                            "subreader"
+                            mempty
+                            (Set.singleton (Subscription "block"))
+                updatePeers @ZmqTcp $ def & uprAdd .~ (Set.singleton n1)
+                void $ A.concurrently_ (runPinger biQ1) (runSubreader biQ2)
+    void $ A.withAsync node1 $ const $ do
+        threadDelay 1000000
+        node2
   where
     doUnlessM action = ifM action pass (doUnlessM action)
