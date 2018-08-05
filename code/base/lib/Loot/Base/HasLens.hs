@@ -9,6 +9,7 @@ module Loot.Base.HasLens
     ( HasLens(..)
     , HasLens'
     , HasLenses
+    , HasCtx
     ) where
 
 import Data.Coerce (coerce)
@@ -28,3 +29,5 @@ type HasLens' s a = HasLens a s a
 type family HasLenses s as :: Constraint where
     HasLenses s '[] = ()
     HasLenses s (a : as) = (HasLens' s a, HasLenses s as)
+
+type HasCtx ctx m subs = (MonadReader ctx m, HasLenses ctx subs)
