@@ -181,7 +181,7 @@ createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     ztCliBack <- Z.socket ctx Z.Router
     ztCliBackAdapter <- newSocketAdapter ztCliBack
-    Z.setLinger (Z.restrict 0) ztCliBack
+    Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
     forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
