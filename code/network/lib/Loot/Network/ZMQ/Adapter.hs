@@ -6,20 +6,102 @@
 -- ZMQ sockets.
 
 module Loot.Network.ZMQ.Adapter
-       ( atLeastOne
-       , threadWaitReadSTMLong
-       , socketWaitReadSTMLong
+       ( SocketAdapter
+       , newSocketAdapter
+       , adapterRelease
+       , adapterWait
+       , adapterTry
+
+       , atLeastOne
        , canReceive
        ) where
 
 import Control.Concurrent.Async as A
-import Control.Concurrent.STM.TMVar (newTMVarIO, putTMVar, readTMVar, swapTMVar, takeTMVar,
-                                     tryReadTMVar)
+import Control.Concurrent.STM.TVar (TVar, readTVar, writeTVar)
 import Control.Monad.STM (retry)
 import Data.List.NonEmpty as NE
 import qualified GHC.Conc.IO as G
 import System.Posix.Types (Fd)
 import qualified System.ZMQ4 as Z
+
+-- | Internal socket adapter state. It is manipulated by several
+-- threads, atomically.
+--
+-- The main worker thread switches it.
+--
+-- notInitialised | justRead → waiting   and blocks on threadWaitRead
+-- waiting                   → canRead   and repeats
+--
+-- Other thread waits for the "canRead" state and then atomically
+-- switches it to "justRead" which resumes the main worker. After this
+-- "other thread" does the swap, it must read from the socket, because
+-- sockets are edge triggered and threadWaitRead won't unblock in the
+-- worker thread otherwise.
+data SocketState
+    = SSNotInitialised -- ^ Worker hasn't yet reached blocking section.
+    | SSWaiting        -- ^ Currently waiting for messages from socket.
+    | SSCanRead        -- ^ Data can be read from socket.
+    | SSJustRead       -- ^ Data was just read from socket.
+    deriving (Eq)
+
+-- | Socket-related type that adapts it to STM-style polling.
+data SocketAdapter = SocketAdapter (TVar SocketState) (A.Async ())
+
+-- | Produces stm action corresponding to the action "lock until it is
+-- possible to read from the socket". It doesn't guarantee that there
+-- is actually any data to read from it.
+threadWaitReadSTMLong :: Fd -> IO (TVar SocketState, A.Async ())
+threadWaitReadSTMLong fd = do
+    m <- newTVarIO SSNotInitialised
+
+    -- Fork updater thread.
+    t <- A.async $ forever $ do
+        -- Section 1
+        atomically $ readTVar m >>= \case
+            SSWaiting        -> error "threadWaitReadSTMLong: SSWaiting"
+            SSCanRead        -> retry
+            SSNotInitialised -> writeTVar m SSWaiting
+            SSJustRead       -> writeTVar m SSWaiting
+        -- Section 2
+        G.threadWaitRead fd
+        -- Section 3
+        atomically $ writeTVar m SSCanRead
+
+    -- Wait until async action passes section 1.
+    atomically $ do
+        v <- readTVar m
+        if v == SSNotInitialised then retry else pass
+
+    pure (m, t)
+
+-- | Create new socket adapter.
+newSocketAdapter :: MonadIO m => Z.Socket t -> m SocketAdapter
+newSocketAdapter s = liftIO $ do
+    fd <- Z.fileDescriptor s
+    (m, t) <- threadWaitReadSTMLong fd
+    pure $ SocketAdapter m t
+
+-- | Release socket adapter.
+adapterRelease :: MonadIO m => SocketAdapter -> m ()
+adapterRelease (SocketAdapter _ t) = liftIO $ A.cancel t
+
+-- | Wait until any message comes to the socket.
+adapterWait :: SocketAdapter -> STM ()
+adapterWait (SocketAdapter m _) = do
+    readTVar m >>= \case
+        SSCanRead -> writeTVar m SSJustRead
+        _         -> retry
+
+-- | Check if there are any messages can be read from socket.
+adapterTry :: SocketAdapter -> STM Bool
+adapterTry (SocketAdapter m _) =
+    readTVar m >>= \case
+        SSCanRead -> True <$ writeTVar m SSJustRead
+        _ -> pure False
+
+----------------------------------------------------------------------------
+-- Helpers
+----------------------------------------------------------------------------
 
 -- | Given a set of STM actions, returns all that succeed if at least
 -- one does.
@@ -28,43 +110,6 @@ atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
     [] -> retry
     x:xs -> pure $ x :| xs
 
--- | Produces stm action corresponding to the action "lock until it is
--- possible to read from the socket". It doesn't guarantee that there
--- is actually any data to read from it.
-threadWaitReadSTMLong :: Fd -> IO (STM (), STM Bool, IO ())
-threadWaitReadSTMLong fd = do
-    -- Bool value inside indicates who should take action now. If it's
-    -- false, it's updater thread, if it's true it's main wait thread.
-    m <- newTMVarIO False
-    -- Fork updater thread.
-    t <- A.async $ forever $ do
-        -- Take the content of the TMVar if it's False, otherwise skip.
-        atomically $ do
-            v <- readTMVar m
-            if v == False
-            then void (takeTMVar m)
-            else retry
-        G.threadWaitRead fd
-        atomically $ putTMVar m True
-    let waitAction = do
-            v <- readTMVar m
-            if v == True
-            then void (swapTMVar m False) -- We now pass flag to another thread
-            else retry                    -- Another thread haven't yet taken the lock
-    let tryAction =
-            tryReadTMVar m >>= \case
-                Nothing -> pure False -- updater thread is blocking
-                Just False -> pure False -- content has already been taken
-                Just True -> True <$ void (swapTMVar m False)
-    let killAction = A.cancel t
-    return (waitAction, tryAction, killAction)
-
--- | 'threadWaitReadSTMLong' adapted for sockets.
-socketWaitReadSTMLong :: (MonadIO m) => Z.Socket t -> m (STM (), STM Bool, m ())
-socketWaitReadSTMLong s = liftIO $ do
-    fd <- Z.fileDescriptor s
-    (stmWait, stmTry, destroy) <- threadWaitReadSTMLong fd
-    pure (stmWait, stmTry, liftIO destroy)
 
 -- | Checks if data can be received from the socket. Use @whileM
 -- canReceive process@ pattern after the STM action on the needed

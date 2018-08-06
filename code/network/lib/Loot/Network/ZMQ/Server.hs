@@ -73,8 +73,12 @@ data ZTNetServEnv = ZTNetServEnv
     , ztServFront        :: !(Z.Socket Z.Router)
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
+    , ztServFrontAdapter :: !SocketAdapter
+      -- ^ Front socket adapter.
     , ztServPub          :: !(Z.Socket Z.Pub)
       -- ^ Publishing socket. For publishing.
+    , ztServPubAdapter   :: !SocketAdapter
+      -- ^ Pub socket adapter.
 
     , ztListeners        :: !(TVar (Map ListenerId ZTListenerEnv))
       -- ^ Information about listeners, map from id to info. Id
@@ -93,10 +97,12 @@ data ZTNetServEnv = ZTNetServEnv
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
 createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
     ztServFront <- Z.socket ctx Z.Router
+    ztServFrontAdapter <- newSocketAdapter ztServFront
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
     Z.bind ztServFront (ztNodeIdRouter ztOurNodeId)
 
     ztServPub <- Z.socket ctx Z.Pub
+    ztServPubAdapter <- newSocketAdapter ztServPub
     Z.bind ztServPub (ztNodeIdPub ztOurNodeId)
 
     ztListeners <- newTVarIO mempty
@@ -109,7 +115,9 @@ createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
 -- | Terminates server environment.
 termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
 termNetServEnv ZTNetServEnv{..} = liftIO $ do
+    adapterRelease ztServFrontAdapter
     Z.close ztServFront
+    adapterRelease ztServPubAdapter
     Z.close ztServPub
 
 data ServBrokerStmRes
@@ -168,7 +176,6 @@ runBroker = do
             atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
     liftIO $ A.withAsync hbWorker $ const $ do
-      (_, frontStmTry, frontDestroy) <- socketWaitReadSTMLong ztServFront
       let action = liftIO $ do
               results <- atomically $ do
                   lMap <- readTVar ztListeners
@@ -181,15 +188,17 @@ runBroker = do
                                  fmap (\content -> SBListener listId content) <$>
                                  TQ.tryReadTQueue (bSendQ biq))
                               (Map.toList lMap)
-                  atLeastOne $ NE.fromList $ [ readReq
-                                             , (bool Nothing (Just SBFront)) <$> frontStmTry ]
+                  atLeastOne $ NE.fromList $
+                      [ readReq
+                      , (bool Nothing (Just SBFront)) <$> adapterTry ztServFrontAdapter ]
                                              ++ readListeners
               forM_ results $ \case
                   SBRequest r         -> processReq r
                   SBListener _lId msg -> processMsg msg
                   SBFront             -> whileM (canReceive ztServFront) $
                                          Z.receiveMulti ztServFront >>= frontToListener
-      forever action `finally` frontDestroy
+      forever action `catchAny`
+          (\e -> ztLog ztServLogging Warning $ "Server broker exited: " <> show e)
 
 registerListener ::
        (MonadReader r m, MonadIO m)

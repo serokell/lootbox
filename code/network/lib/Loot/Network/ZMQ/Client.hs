@@ -146,9 +146,13 @@ data ZTNetCliEnv = ZTNetCliEnv
       ztCliBack         :: !(Z.Socket Z.Router)
       -- ^ Backend which receives data from the network and routes it
       -- to client workers.
+    , ztCliBackAdapter  :: !SocketAdapter
+      -- ^ Socket adapter for backend socket.
     , ztCliSub          :: !(Z.Socket Z.Sub)
       -- ^ Subscriber socket which is listening to other nodes'
       -- updates. It also sends data to clients .
+    , ztCliSubAdapter   :: !SocketAdapter
+      -- ^ Socket adapter for backend socket.
 
     , ztPeers           :: !(TVar (Set ZTNodeId))
       -- ^ List of peers we are connected to. Is to be updated by the
@@ -176,10 +180,12 @@ data ZTNetCliEnv = ZTNetCliEnv
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     ztCliBack <- Z.socket ctx Z.Router
-    Z.setLinger (Z.restrict 0) ztCliBack
+    ztCliBackAdapter <- newSocketAdapter ztCliBack
+    Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
     forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
+    ztCliSubAdapter <- newSocketAdapter ztCliSub
     forM_ peers $ Z.connect ztCliSub . ztNodeIdPub
     Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
 
@@ -189,17 +195,20 @@ createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
-    -- Peers will be added by the server itself
-    atomically $ TQ.writeTQueue (unCliRequestQueue ztCliRequestQueue) $
-        IRUpdatePeers $ def & uprAdd .~ peers
 
     let ztCliLogging = ztLogging & logNameSelL . _GivenName %~ (<> "cli")
-    pure $ ZTNetCliEnv {..}
+    let ztCliEnv = ZTNetCliEnv {..}
+
+    changePeers ztCliEnv $ def & uprAdd .~ peers
+
+    pure ztCliEnv
 
 -- | Terminates client environment.
 termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
 termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
+    adapterRelease ztCliBackAdapter
     Z.close ztCliBack
+    adapterRelease ztCliSubAdapter
     Z.close ztCliSub
 
 changePeers :: MonadIO m => ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
@@ -363,33 +372,44 @@ runBroker = do
                                     "message for key " <> show k
             other -> ztCliLog Warning $ "subToClients: wrong format: " <> show other
 
-    hbWorker <- liftIO $ A.async $ heartbeatWorker cEnv
-    (_, backStmTry, backDestroy) <- socketWaitReadSTMLong ztCliBack
-    (_, subStmTry, subDestroy) <- socketWaitReadSTMLong ztCliSub
-    let action = liftIO $ do
-            results <- atomically $ do
-                cMap <- readTVar ztClients
-                let readReq =
-                        fmap CBRequest <$>
-                        TQ.tryReadTQueue (unCliRequestQueue ztCliRequestQueue)
-                let readClient :: [STM (Maybe CliBrokerStmRes)]
-                    readClient =
-                        map (\(cliId,biq) ->
-                                fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
-                                TQ.tryReadTQueue (bSendQ biq))
-                            (Map.toList cMap)
-                let boolToMaybe t = bool Nothing (Just t)
-                atLeastOne $ NE.fromList $ [ readReq
-                                           , boolToMaybe CBBack <$> backStmTry
-                                           , boolToMaybe CBSub <$> subStmTry ] ++ readClient
-            forM_ results $ \case
-                CBRequest r             -> processReq r
-                CBClient _cId nIdM cont -> clientToBackend nIdM cont
-                CBBack                  -> whileM (canReceive ztCliBack) $
-                                           Z.receiveMulti ztCliBack >>= backendToClients
-                CBSub                   -> whileM (canReceive ztCliSub) $
-                                           Z.receiveMulti ztCliSub >>= subToClients
-    forever action `finally` (backDestroy >> subDestroy >> liftIO (A.cancel hbWorker))
+    liftIO $ A.withAsync (heartbeatWorker cEnv) $ const $ do
+      let receiveBack = whileM (canReceive ztCliBack) $
+                        Z.receiveMulti ztCliBack >>= backendToClients
+      let receiveSub  = whileM (canReceive ztCliSub) $
+                        Z.receiveMulti ztCliSub >>= subToClients
+      let action = do
+              results <- atomically $ do
+                  cMap <- readTVar ztClients
+                  let readReq =
+                          fmap CBRequest <$>
+                          TQ.tryReadTQueue (unCliRequestQueue ztCliRequestQueue)
+                  let readClient :: [STM (Maybe CliBrokerStmRes)]
+                      readClient =
+                          map (\(cliId,biq) ->
+                                  fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
+                                  TQ.tryReadTQueue (bSendQ biq))
+                              (Map.toList cMap)
+                  let boolToMaybe t = bool Nothing (Just t)
+                  atLeastOne $ NE.fromList $
+                      [ readReq
+                      , boolToMaybe CBSub <$> adapterTry ztCliSubAdapter
+                      , boolToMaybe CBBack <$> adapterTry ztCliBackAdapter
+                      ] ++ readClient
+              forM_ results $ \case
+                  CBRequest r             -> processReq r
+                  CBClient _cId nIdM cont -> clientToBackend nIdM cont
+                  CBBack                  -> receiveBack
+                  CBSub                   -> receiveSub
+
+      -- DSCP-177 Sockets must be processed at least once in the beginning
+      -- for 'threadWaitRead' to function correctly later. This is not a
+      -- solution, but a workaround -- I haven't managed to find the
+      -- explanatian of why does it happen (@volhovm).
+      receiveBack
+      receiveSub
+
+      forever action `catchAny`
+          (\e -> ztCliLog Warning $ "Client broker exited: " <> show e)
 
 ----------------------------------------------------------------------------
 -- Methods
