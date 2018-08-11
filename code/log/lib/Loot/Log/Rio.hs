@@ -8,7 +8,7 @@ module Loot.Log.Rio
     , defaultModifyLogNameSel
     ) where
 
-import Control.Lens (views)
+import Lens.Micro (to)
 import Loot.Base.HasLens (HasLens', lensOf)
 
 import Loot.Log.Internal (Level, Logging (..), Name, NameSelector, logNameSelL)
@@ -25,7 +25,7 @@ defaultLog
        (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
     => Level -> Name -> Text -> m ()
 defaultLog l n t = do
-    lg <- views (lensOf @LoggingIO) _log
+    lg <- view (lensOf @LoggingIO . to _log) <$> ask
     liftIO $ lg l n t
 
 -- | Default implementation of 'MonadLogging.logName' (generated with
