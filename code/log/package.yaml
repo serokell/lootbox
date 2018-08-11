@@ -11,8 +11,8 @@ library:
     - dlist
     - fmt
     - loot-base
-    - lens
     - log-warper
+    - microlens
     - mtl
     - text
 

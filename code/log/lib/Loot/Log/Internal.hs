@@ -16,7 +16,6 @@ module Loot.Log.Internal
        , pkgName
 
        , NameSelector (..)
-       , _GivenName
        , selectLogName
        , Logging (..)
        , hoistLogging
@@ -37,7 +36,6 @@ module Loot.Log.Internal
 
 import Prelude hiding (log, toList)
 
-import Control.Lens (Setter', makePrisms, sets)
 import Data.DList (DList)
 import Fmt (Buildable (build), fmt, (+|), (|+))
 import Fmt.Internal (FromBuilder (fromBuilder))
@@ -45,6 +43,7 @@ import GHC.Exts (IsList (Item, fromList, toList), IsString (fromString))
 import GHC.Stack (CallStack, HasCallStack,
                   SrcLoc (SrcLoc, srcLocModule, srcLocPackage, srcLocStartLine), callStack,
                   getCallStack)
+import Lens.Micro (ASetter', sets)
 import Monad.Capabilities (makeCap)
 import Text.Show (Show (show))
 
@@ -122,8 +121,6 @@ data NameSelector
     = CallstackName
     | GivenName Name
 
-makePrisms ''NameSelector
-
 -- | Take a 'Name' according to 'NameSelector'.
 selectLogName :: HasCallStack => CallStack -> NameSelector -> Name
 selectLogName cs CallstackName = nameFromStack cs
@@ -143,7 +140,7 @@ hoistLogging hst logging =
             , _logName = hst (_logName logging)
             }
 
-logNameSelL :: Functor m => Setter' (Logging m) NameSelector
+logNameSelL :: Functor m => ASetter' (Logging m) NameSelector
 logNameSelL = sets $ \f l -> l{ _logName = fmap f (_logName l) }
 
 -- | Helper function for use 'logDebug' and family.
@@ -167,12 +164,12 @@ logWarning = logWith Warning callStack
 logError :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
 logError = logWith Error callStack
 
+
 -- | Allows to manipulate with logger name.
 class MonadLogging m => ModifyLogName m where
     modifyLogNameSel :: (NameSelector -> NameSelector) -> m a -> m a
 
 type WithLogging m = (MonadLogging m, ModifyLogName m)
 
--- | If a manually provided name is used, changes it.
 modifyLogName :: ModifyLogName m => (Name -> Name) -> m a -> m a
-modifyLogName f = modifyLogNameSel (_GivenName %~ f)
+modifyLogName f = modifyLogNameSel (GivenName . f . selectLogName callStack)
