@@ -48,7 +48,7 @@ instance Exception EncodingError
 -- | Turn entropy (pure bytes) into a mnemonic.
 entropyToMnemonic :: HasCallStack => ByteString -> [Text]
 entropyToMnemonic ent = either impureThrow id . runExcept $ do
-    unless (4 <= entBytes && entBytes <= 8) $
+    unless (16 <= entBytes && entBytes <= 32) $
         throwError (LengthOutOfBounds entBytes)
     unless (remainder == 0) $ throwError (NotDivisibleBy4 remainder)
     pure $ map (words_en A.!) indices
