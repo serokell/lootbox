@@ -4,7 +4,7 @@
 
 -- | Internals of logging.
 module Loot.Log.Internal
-       ( LogEvent
+       ( LogEvent (..)
 
        , Level (..)
 

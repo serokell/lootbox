@@ -15,6 +15,7 @@ library:
     - log-warper
     - mtl
     - text
+    - time
 
 tests:
   loot-base-test:

@@ -8,16 +8,25 @@ Please, be advised that this logging library is somewhat opinionated. In particu
 1. It assumes that you are using the `fmt` library to format your log messages.
 2. It uses a hierarchical structure of loggers and automatically derives the name of
    the logger to write a message to from the name of the module.
-3. It is expected to be used with the `caps` framework.
 
 
 ## Quick Start
 
-1. Make sure your are in the `CapsT` monad.
-2. Initialise the `Logging` capability by configuring the logging backend
-   (currently it is `log-warper`, so you’ll use `withLogWarper`).
-3. Call logging functions where appropriate (add the `MonadLogging` constraint).
+We know that in the beginning of your project you’ll probably be able to get away
+with something very straightforward. In this case you can start with
+`Loot.Config.Rustic`, which is a trivial logging implementation that writes
+directly to `stderr`, works in any `MonadIO` and the only thing you can configure
+is enable the output of `Debug` events by compiling with `-DDEBUG`.
 
+```haskell
+import Loot.Config.Rustic
+
+main :: IO ()
+main = logInfo "hello, logging!"
+```
+
+As your project grows you’ll want to make the logging configurable, so you’ll
+replace rustic logging with a proper implementation.
 
 ## Philosophy
 
@@ -37,6 +46,5 @@ for messages having the same module name prefix is exactly what you need.
 ### Dynamic Scope
 
 What to do if you want to adjust the logging configuration for all messages produced
-by any code called by a specific function? Well, you are lucky, because this is exactly
-what the `caps` framework is meant to do. The only thing `loot-log` has to do is provide
-access to the configuration and then you will simply use `adjustCap`.
+by any code called by a specific function? Hopefully, you’ll be able to do this
+somehow, but this functionality is currently in the works.
