@@ -43,7 +43,6 @@ _definitions:
 
     - &ghc-options
         - -Wall
-        - -hide-package base
 
 
   _utils:
