@@ -7,11 +7,12 @@ module Test.Loot.Crypto.Bip39 where
 
 import Loot.Crypto.Bip39
 
+import Control.Exception (evaluate)
 import Data.Bits (shiftL, shiftR, (.|.))
 import Data.ByteString.Base16 (decode)
 
 import Hedgehog (Property, annotateShow, forAll, property, (===))
-import Test.Tasty.HUnit (Assertion, (@=?))
+import Test.Tasty.HUnit (Assertion, assertFailure, (@=?))
 
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -68,6 +69,19 @@ hprop_bytesToIndices_many = property $ do
     annotateShow words8
 
     ws === bytesToIndices words8
+
+
+-----------------------
+-- Regression tests.
+-----------------------
+
+unit_ltb33_force_errors :: Assertion
+unit_ltb33_force_errors = do
+    res <- try (evaluate $ entropyToMnemonic "1")
+    case res of
+        Left (LengthOutOfBounds 1) -> pure ()
+        Left e                     -> assertFailure $ "Unexpected exception: " ++ show e
+        Right _                    -> assertFailure $ "Expected exception"
 
 
 -----------------------
