@@ -10,6 +10,8 @@ library:
     - bytestring
     - cryptonite
     - memory
+    - mtl
+    - safe-exceptions
     - text-icu
 
 tests:
@@ -27,3 +29,5 @@ tests:
 
       - base16-bytestring
       - bytestring
+      - exceptions
+      - safe-exceptions
