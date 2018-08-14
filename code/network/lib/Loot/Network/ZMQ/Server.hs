@@ -31,7 +31,7 @@ import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Level (..), Logging (..), logNameSelL, _GivenName)
+import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), logNameSelL)
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
@@ -117,7 +117,9 @@ createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId ztOurPrivNodeIdM = lift
     ztMsgTypes <- newTVarIO mempty
     ztServRequestQueue <- ServRequestQueue <$> TQ.newTQueueIO
 
-    let ztServLogging = ztLogging & logNameSelL . _GivenName %~ (<> "serv")
+    let modGivenName (GivenName x) = GivenName $ x <> "serv"
+        modGivenName x             = x
+    let ztServLogging = ztLogging & logNameSelL %~ modGivenName
     pure ZTNetServEnv {..}
 
 -- | Terminates server environment.

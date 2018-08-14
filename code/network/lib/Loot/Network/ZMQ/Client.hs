@@ -36,7 +36,7 @@ import qualified Text.Show as T
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Level (..), Logging (..), logNameSelL, _GivenName)
+import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), logNameSelL)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
@@ -196,7 +196,9 @@ createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
 
-    let ztCliLogging = ztLogging & logNameSelL . _GivenName %~ (<> "cli")
+    let modGivenName (GivenName x) = GivenName $ x <> "cli"
+        modGivenName x             = x
+    let ztCliLogging = ztLogging & logNameSelL %~ modGivenName
     let ztCliEnv = ZTNetCliEnv {..}
 
     changePeers ztCliEnv $ def & uprAdd .~ peers
