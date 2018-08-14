@@ -6,6 +6,7 @@ library:
   <<: *lib-common
 
   dependencies:
+    - microlens
     - tagged
 
 tests:

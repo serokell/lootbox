@@ -16,7 +16,7 @@ module Loot.Config.Lens
 import Data.Vinyl (Label (..))
 import GHC.TypeLits (ErrorMessage (Text), Symbol, TypeError)
 
-import Loot.Base.HasLens (HasLens (..))
+import Loot.Base.HasLens (HasTaggedGetter (..), HasTaggedLens (..))
 import Loot.Config.Record
 
 ----------------------------------------------------------------------------
@@ -91,14 +91,18 @@ instance (HasSub l is us, HierarchyLens lx us v) =>
             (hlens @lx :: Lens' (ConfigRec 'Final us) v)
 
 ----------------------------------------------------------------------------
--- HasLens Instance
+-- HasTaggedLens Instance
 ----------------------------------------------------------------------------
 
-instance
-         ( ItemTypeUnique v is
+instance ( ItemTypeUnique v is
          , HierarchyLens (LabelOfTypeS v is) is v
          ) =>
-         HasLens v (ConfigRec 'Final is) v where
+         HasTaggedGetter v (ConfigRec 'Final is) v
+
+instance ( ItemTypeUnique v is
+         , HierarchyLens (LabelOfTypeS v is) is v
+         ) =>
+         HasTaggedLens v (ConfigRec 'Final is) (ConfigRec 'Final is) v v where
     lensOf = hlens @(LabelOfTypeS v is)
 
 -- | Like 'HasLens', but with record key.
