@@ -36,13 +36,13 @@ data BigState = BigState
 makeLenses ''BigState
 
 
-instance HasLens ZTNetCliEnv BigState ZTNetCliEnv where
+instance HasLens BigState ZTNetCliEnv where
     lensOf = bsCli
 
-instance HasLens ZTNetServEnv BigState ZTNetServEnv where
+instance HasLens BigState ZTNetServEnv where
     lensOf = bsServ
 
-instance HasLens ZTGlobalEnv BigState ZTGlobalEnv where
+instance HasLens BigState ZTGlobalEnv where
     lensOf = bsCtx
 
 type Env a = ReaderT BigState IO a

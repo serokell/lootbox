@@ -1,33 +1,31 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds     #-}
 {-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DefaultSignatures   #-}
 {-# LANGUAGE TypeFamilies        #-}
 {-# LANGUAGE TypeOperators       #-}
 
 -- | Basic "has" lenses, extracted from the 'ether' package.
 module Loot.Base.HasLens
-    ( HasLens(..)
-    , HasLens'
+    ( HasLens (lensOf)
     , HasLenses
     , HasCtx
+    , glensOf
     ) where
 
-import Data.Coerce (coerce)
-import Data.Tagged (Tagged (..))
+-- | Class for those @s@ that contain a modifiable @a@ in them.
+class HasLens s a where
+    lensOf :: Lens' s a
 
-class HasLens tag outer inner | tag outer -> inner where
-    lensOf :: Lens' outer inner
-
-instance HasLens a a a where
+instance HasLens a a where
     lensOf = id
-
-instance HasLens t (Tagged t a) a where
-    lensOf = \f -> fmap coerce . f . coerce
-
-type HasLens' s a = HasLens a s a
 
 type family HasLenses s as :: Constraint where
     HasLenses s '[] = ()
-    HasLenses s (a : as) = (HasLens' s a, HasLenses s as)
+    HasLenses s (a : as) = (HasLens s a, HasLenses s as)
 
 type HasCtx ctx m subs = (MonadReader ctx m, HasLenses ctx subs)
+
+-- | A flexible variation of 'lensOf' parametrised in a phantom type.
+glensOf :: forall tag c ctx. HasLens ctx (c tag) => Lens' ctx (c tag)
+glensOf = lensOf

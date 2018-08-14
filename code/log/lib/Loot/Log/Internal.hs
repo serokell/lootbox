@@ -5,5 +5,5 @@ module Loot.Log.Internal
        ) where
 
 import Loot.Log.Internal.Logging
-import Loot.Log.Internal.Name
 import Loot.Log.Internal.Message
+import Loot.Log.Internal.Name

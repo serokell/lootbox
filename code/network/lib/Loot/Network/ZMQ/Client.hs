@@ -35,7 +35,7 @@ import qualified Text.Show as T
 
 import qualified System.ZMQ4 as Z
 
-import Loot.Base.HasLens (HasLens (..), HasLens')
+import Loot.Base.HasLens (HasLens (..))
 import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNameSelL)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
@@ -484,14 +484,14 @@ instance Show CliBrokerStmRes where
 
 runBroker ::
        ( MonadReader r m
-       , HasLens' r ZTNetCliEnv
-       , HasLens' r ZTGlobalEnv
+       , HasLens r ZTNetCliEnv
+       , HasLens r ZTGlobalEnv
        , MonadIO m
        )
     => m ()
 runBroker = do
-    gEnv@ZTGlobalEnv{..} <- view $ lensOf @ZTGlobalEnv
-    cEnv@ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
+    gEnv@ZTGlobalEnv{..} <- view lensOf
+    cEnv@ZTNetCliEnv{..} <- view lensOf
 
     let ztCliLog = ztLog ztCliLogging
 
@@ -634,9 +634,9 @@ runBroker = do
 
 -- | Retrieve peers we're connected to.
 getPeers ::
-       (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m) => m (Set ZTNodeId)
+       (MonadReader r m, HasLens r ZTNetCliEnv, MonadIO m) => m (Set ZTNodeId)
 getPeers = do
-    peersVar <- ztPeers <$> view (lensOf @ZTNetCliEnv)
+    peersVar <- ztPeers <$> view lensOf
     Set.fromList . HMap.keys <$> readTVarIO peersVar
 
 -- | Register a new client.

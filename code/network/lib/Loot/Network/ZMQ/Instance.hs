@@ -18,7 +18,7 @@ module Loot.Network.ZMQ.Instance
     , registerListenerDefault
     ) where
 
-import Loot.Base.HasLens (HasLens (..), HasLens')
+import Loot.Base.HasLens (HasLens (..))
 import qualified Loot.Network.Class as C
 import qualified Loot.Network.ZMQ.Client as ZC
 import Loot.Network.ZMQ.Common (ZTGlobalEnv, ZTNodeId)
@@ -30,36 +30,36 @@ type ReaderIOM r m = (MonadReader r m, MonadIO m)
 -- Client
 ----------------------------------------------------------------------------
 
-runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, HasLens' r ZTGlobalEnv) => m ()
+runClientDefault :: (ReaderIOM r m, HasLens r ZC.ZTNetCliEnv, HasLens r ZTGlobalEnv) => m ()
 runClientDefault = ZC.runBroker
 
-getPeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
+getPeersDefault :: (ReaderIOM r m, HasLens r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
 getPeersDefault = ZC.getPeers
 
-updatePeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => ZC.ZTUpdatePeersReq -> m ()
+updatePeersDefault :: (ReaderIOM r m, HasLens r ZC.ZTNetCliEnv) => ZC.ZTUpdatePeersReq -> m ()
 updatePeersDefault x = do
-    q <- ZC.ztCliRequestQueue <$> view (lensOf @ZC.ZTNetCliEnv)
+    q <- ZC.ztCliRequestQueue <$> view lensOf
     ZC.updatePeers q x
 
 registerClientDefault ::
-       (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv)
+       (ReaderIOM r m, HasLens r ZC.ZTNetCliEnv)
     => C.ClientId
     -> Set C.MsgType
     -> Set C.Subscription
     -> m ZC.ZTClientEnv
 registerClientDefault c m s = do
-    q <- ZC.ztCliRequestQueue <$> view (lensOf @ZC.ZTNetCliEnv)
+    q <- ZC.ztCliRequestQueue <$> view lensOf
     ZC.registerClient q c m s
 
 ----------------------------------------------------------------------------
 -- Server
 ----------------------------------------------------------------------------
 
-runServerDefault :: (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv) => m ()
+runServerDefault :: (ReaderIOM r m, HasLens r ZS.ZTNetServEnv) => m ()
 runServerDefault = ZS.runBroker
 
 registerListenerDefault ::
-       (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv)
+       (ReaderIOM r m, HasLens r ZS.ZTNetServEnv)
     => C.ListenerId
     -> Set C.MsgType
     -> m ZS.ZTListenerEnv

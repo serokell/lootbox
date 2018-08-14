@@ -91,11 +91,10 @@ instance (HasSub l is us, HierarchyLens lx us v) =>
 -- HasLens Instance
 ----------------------------------------------------------------------------
 
-instance
-         ( ItemTypeUnique v is
+instance ( ItemTypeUnique v is
          , HierarchyLens (LabelOfTypeS v is) is v
          ) =>
-         HasLens v (ConfigRec 'Final is) v where
+         HasLens (ConfigRec 'Final is) v where
     lensOf = hlens @(LabelOfTypeS v is)
 
 -- | Like 'HasLens', but with record key.

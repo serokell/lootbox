@@ -30,7 +30,7 @@ import qualified Text.Show as T
 
 import qualified System.ZMQ4 as Z
 
-import Loot.Base.HasLens (HasLens (..), HasLens')
+import Loot.Base.HasLens (HasLens (..))
 import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNameSelL)
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
@@ -179,9 +179,9 @@ resolveSocketIndex i
     | i == 2 = ListenersSocket
     | otherwise = error "couldn't resolve polling socket index"
 
-runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m) => m ()
+runBroker :: (MonadReader r m, HasLens r ZTNetServEnv, MonadIO m) => m ()
 runBroker = do
-    sEnv@ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
+    sEnv@ZTNetServEnv{..} <- view lensOf
 
     let publish k v =
             Z.sendMulti ztServPub $ NE.fromList $ [unSubscription k] ++ v
@@ -259,10 +259,10 @@ runBroker = do
                     threadDelay 2000000)
 
 registerListener ::
-       (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m)
+       (MonadReader r m, HasLens r ZTNetServEnv, MonadIO m)
     => ListenerId -> Set MsgType -> m ZTListenerEnv
 registerListener lName msgTypes = do
-    servRequestQueue <- ztServRequestQueue <$> view (lensOf @ZTNetServEnv)
+    servRequestQueue <- ztServRequestQueue <$> view lensOf
     liftIO $ do
         biTQueue <- newBtq
         iqSend servRequestQueue $ IRRegister lName msgTypes biTQueue

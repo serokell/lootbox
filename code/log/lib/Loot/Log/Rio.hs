@@ -10,9 +10,9 @@ module Loot.Log.Rio
     ) where
 
 import Lens.Micro (to)
-import Loot.Base.HasLens (HasLens', lensOf)
+import Loot.Base.HasLens (HasLens, lensOf)
 
-import Loot.Log.Internal (Logging (..), NameSelector, logNameSelL, Message (..))
+import Loot.Log.Internal (Logging (..), Message (..), NameSelector, logNameSelL)
 
 -- | We provide default implementations for @LoggingIO@ because it facilitates
 -- movement of logging capability between different monads (and also we will
@@ -23,24 +23,24 @@ type LoggingIO = Logging IO
 -- | Default implementation of 'MonadLogging.log' (generated with 'makeCap').
 defaultLog
     :: forall m ctx.
-       (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
+       (HasLens ctx LoggingIO, MonadReader ctx m, MonadIO m)
     => Message -> m ()
 defaultLog msg = do
-    lg <- view (lensOf @LoggingIO . to _log) <$> ask
+    lg <- view (lensOf . to _log) <$> ask
     liftIO $ lg msg
 
 -- | Default implementation of 'MonadLogging.logName' (generated with
 -- 'makeCap').
 defaultLogName
     :: forall m ctx.
-       (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
+       (HasLens ctx LoggingIO, MonadReader ctx m, MonadIO m)
     => m NameSelector
-defaultLogName = view (lensOf @LoggingIO) >>= liftIO . _logName
+defaultLogName = view lensOf >>= liftIO . _logName
 
 -- | Default implementation of 'modifyLogNameSel' method.
 defaultModifyLogNameSel
     :: forall m ctx a.
-       (HasLens' ctx LoggingIO, MonadReader ctx m)
+       (HasLens ctx LoggingIO, MonadReader ctx m)
     => (NameSelector -> NameSelector) -> m a -> m a
 defaultModifyLogNameSel f =
-    local (lensOf @LoggingIO . logNameSelL %~ f)
+    local (lensOf @_ @LoggingIO . logNameSelL %~ f)
