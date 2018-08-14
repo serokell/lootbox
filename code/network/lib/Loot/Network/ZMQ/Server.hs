@@ -70,6 +70,10 @@ data ZTNetServEnv = ZTNetServEnv
     { ztOurNodeId        :: !ZTNodeId
       -- ^ Our identifier, in case we need it to send someone
       -- explicitly (e.g. when PUBlishing).
+    , ztOurPrivNodeId    :: !ZTNodeId
+      -- ^ This is a "real" host/port we bind to. It's the same
+      -- as 'ztOurNodeId' except for the situation when server
+      -- is launched with explicit distinct private host to bind to.
     , ztServFront        :: !(Z.Socket Z.Router)
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
@@ -93,17 +97,21 @@ data ZTNetServEnv = ZTNetServEnv
       -- ^ Logging function from global context.
     }
 
--- | Creates server environment.
-createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
-createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
+-- | Creates server environment. Accepts our public node id and optional "private"
+-- node id, which we actually bind to. This allows us to work behind NAT, binding
+-- on A but pretending to serve on B.
+createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> Maybe ZTNodeId -> m ZTNetServEnv
+createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId ztOurPrivNodeIdM = liftIO $ do
+    let ztOurPrivNodeId = fromMaybe ztOurNodeId ztOurPrivNodeIdM
+
     ztServFront <- Z.socket ctx Z.Router
     ztServFrontAdapter <- newSocketAdapter ztServFront
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
-    Z.bind ztServFront (ztNodeIdRouter ztOurNodeId)
+    Z.bind ztServFront (ztNodeIdRouter ztOurPrivNodeId)
 
     ztServPub <- Z.socket ctx Z.Pub
     ztServPubAdapter <- newSocketAdapter ztServPub
-    Z.bind ztServPub (ztNodeIdPub ztOurNodeId)
+    Z.bind ztServPub (ztNodeIdPub ztOurPrivNodeId)
 
     ztListeners <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
