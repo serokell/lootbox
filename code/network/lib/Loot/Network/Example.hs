@@ -84,8 +84,10 @@ withZMQ name nId peers server action = do
 
 testZmq :: IO ()
 testZmq = do
-    let n1 = (ZTNodeId "127.0.0.1" 8001 8002)
-    let n2 = (ZTNodeId "127.0.0.1" 8003 8004)
+    n1 <- mkZTNodeId (PreZTNodeId "localhost" 8001 8002)
+    n2 <- mkZTNodeId (PreZTNodeId "localhost" 8003 8004)
+    print n1
+    print n2
     let node1 = do
             let runPonger biQ = forever $
                     atomically $ do

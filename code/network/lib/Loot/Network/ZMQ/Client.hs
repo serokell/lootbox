@@ -229,11 +229,11 @@ changePeers ZTNetCliEnv{..} req = liftIO $ do
             foldr (.) id (map (\nId -> at nId .~ Just initHbs) (Set.toList toAdd))
         pure (toAdd,toDel)
     forM_ toDisconnect $ \z -> do
-        ztLog ztCliLogging Debug $ "changePeers: disconnecting " <> show z
+        ztLog ztCliLogging Info $ "changePeers: disconnecting " <> show z
         Z.disconnect ztCliBack $ ztNodeIdRouter z
         Z.disconnect ztCliSub $ ztNodeIdPub z
     forM_ toConnect $ \z -> do
-        ztLog ztCliLogging Debug $ "changePeers: connecting " <> show z
+        ztLog ztCliLogging Info $ "changePeers: connecting " <> show z
         Z.connect ztCliBack $ ztNodeIdRouter z
         Z.connect ztCliSub $ ztNodeIdPub z
 

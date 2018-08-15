@@ -111,6 +111,7 @@ createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId ztOurPrivNodeIdM = lift
 
     ztServPub <- Z.socket ctx Z.Pub
     ztServPubAdapter <- newSocketAdapter ztServPub
+    Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServPub
     Z.bind ztServPub (ztNodeIdPub ztOurPrivNodeId)
 
     ztListeners <- newTVarIO mempty
