@@ -15,8 +15,11 @@ module Loot.Network.ZMQ.Common
     , withZTGlobalEnv
 
     , endpointTcp
+
+    , PreZTNodeId(..)
+    , parsePreZTNodeId
     , ZTNodeId(..)
-    , parseZTNodeId
+    , mkZTNodeId
 
     , ztNodeIdRouter
     , ztNodeIdPub
@@ -34,6 +37,8 @@ import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List as L
 import qualified Data.Restricted as Z
 import GHC.Stack (HasCallStack, callStack)
+import Network.BSD (getHostByName, hostAddress)
+import Network.Socket (inet_ntoa)
 import qualified System.ZMQ4 as Z
 
 import Loot.Log.Internal (Level, Logging (..), selectLogName)
@@ -82,35 +87,56 @@ ztLog Logging{..} level t = do
 endpointTcp :: String -> Integer -> String
 endpointTcp h p = "tcp://" <> h <> ":" <> show p
 
--- | NodeId as seen in ZMQ TCP.
-data ZTNodeId = ZTNodeId
-    { ztIdHost       :: !String  -- ^ Host.
-    , ztIdRouterPort :: !Integer -- ^ Port for ROUTER socket.
-    , ztIdPubPort    :: !Integer -- ^ Port for PUB socket.
-    } deriving (Eq, Ord, Show, Generic)
-
-instance Serialise ZTNodeId
+-- | Convenient wrapper for host + two ports. This is
+-- later to be converted to 'ZTNodeId'.
+data PreZTNodeId = PreZTNodeId !String !Integer !Integer deriving (Eq, Ord, Show, Generic)
 
 -- | Parser of 'ZTNodeId' in form of "host:port1:port2".
-parseZTNodeId :: String -> Either String ZTNodeId
-parseZTNodeId s = case splitBy ':' s of
-    [ztIdHost,p1,p2] ->
+parsePreZTNodeId :: String -> Either String PreZTNodeId
+parsePreZTNodeId s = case splitBy ':' s of
+    [ztHost,p1,p2] ->
         case (readMaybe p1, readMaybe p2) of
-            (Just ztIdRouterPort, Just ztIdPubPort) -> Right $ ZTNodeId {..}
-            _                                       -> Left "Can't parse either of the ports"
+            (Just port1, Just port2) -> Right $ PreZTNodeId ztHost port1 port2
+            _                        -> Left "Can't parse either of the ports"
     _            -> Left "String should have expactly two columns"
   where
     splitBy :: Eq a => a -> [a] -> [[a]]
     splitBy _ [] = []
     splitBy d s' = x : splitBy d (drop 1 y) where (x,y) = L.span (/= d) s'
 
+-- | NodeId as seen in ZMQ TCP.
+data ZTNodeId = ZTNodeId
+    { ztIdHost       :: !String  -- ^ Host, can be domain name or ip address.
+                                 -- This is what user specifies and it's used for
+                                 -- logging only. Internal code uses internal id.
+    , ztIdInternal   :: !String  -- ^ IP address, must match the resolved host.
+                                 -- It is used as a node identifier.
+    , ztIdRouterPort :: !Integer -- ^ Port for ROUTER socket.
+    , ztIdPubPort    :: !Integer -- ^ Port for PUB socket.
+    } deriving (Eq, Ord, Show, Generic)
+
+instance Serialise ZTNodeId
+
+-- | Creates a proper 'ZTNodeId' from 'PreZTNodeId'.
+mkZTNodeId :: PreZTNodeId -> IO ZTNodeId
+mkZTNodeId (PreZTNodeId ztIdHost ztIdRouterPort ztIdPubPort) = do
+    ztIdInternal <- resolveHost ztIdHost
+    pure $ ZTNodeId {..}
+  where
+    -- Resolves given host. This is needed to unify nodes' identifiers -- all
+    -- socket ids are IPv4 addresses, not hosts.
+    resolveHost :: String -> IO String
+    resolveHost address = do
+        ent <- getHostByName address
+        inet_ntoa (hostAddress ent)
+
 -- | Address of the server's ROUTER/frontend socket.
 ztNodeIdRouter :: ZTNodeId -> String
-ztNodeIdRouter ZTNodeId{..} = endpointTcp ztIdHost ztIdRouterPort
+ztNodeIdRouter ZTNodeId{..} = endpointTcp ztIdInternal ztIdRouterPort
 
 -- | Address of the server's PUB socket.
 ztNodeIdPub :: ZTNodeId -> String
-ztNodeIdPub ZTNodeId{..} = endpointTcp ztIdHost ztIdPubPort
+ztNodeIdPub ZTNodeId{..} = endpointTcp ztIdInternal ztIdPubPort
 
 -- TODO Make unsafe version of this function maybe.
 -- | Agreed standard of server identities public nodes must set on
@@ -130,7 +156,7 @@ ztNodeConnectionIdUnsafe :: ZTNodeId -> ByteString
 ztNodeConnectionIdUnsafe ZTNodeId{..} =
     -- Yes, we use host:frontendPort, it doesn't seem to have
     -- any downsides.
-    BS8.pack $ endpointTcp ztIdHost ztIdRouterPort
+    BS8.pack $ endpointTcp ztIdInternal ztIdRouterPort
 
 -- | Key for heartbeat subscription.
 heartbeatSubscription :: Subscription
