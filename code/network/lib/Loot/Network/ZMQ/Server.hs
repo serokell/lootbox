@@ -36,8 +36,8 @@ import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription, ztLog,
-                                ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
+import Loot.Network.ZMQ.Common (PreZTNodeId (..), ZTGlobalEnv (..), ZTNodeId (..), endpointTcp,
+                                heartbeatSubscription, ztLog, ztNodeConnectionId)
 
 
 ----------------------------------------------------------------------------
@@ -70,7 +70,7 @@ data ZTNetServEnv = ZTNetServEnv
     { ztOurNodeId        :: !ZTNodeId
       -- ^ Our identifier, in case we need it to send someone
       -- explicitly (e.g. when PUBlishing).
-    , ztOurPrivNodeId    :: !ZTNodeId
+    , ztOurPrivNodeId    :: !PreZTNodeId
       -- ^ This is a "real" host/port we bind to. It's the same
       -- as 'ztOurNodeId' except for the situation when server
       -- is launched with explicit distinct private host to bind to.
@@ -100,19 +100,22 @@ data ZTNetServEnv = ZTNetServEnv
 -- | Creates server environment. Accepts our public node id and optional "private"
 -- node id, which we actually bind to. This allows us to work behind NAT, binding
 -- on A but pretending to serve on B.
-createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> Maybe ZTNodeId -> m ZTNetServEnv
+createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> Maybe PreZTNodeId -> m ZTNetServEnv
 createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId ztOurPrivNodeIdM = liftIO $ do
-    let ztOurPrivNodeId = fromMaybe ztOurNodeId ztOurPrivNodeIdM
+    let toPreNodeIdM (ZTNodeId _ h p1 p2) = PreZTNodeId h p1 p2
+    let ztOurPrivNodeId = fromMaybe (toPreNodeIdM ztOurNodeId) ztOurPrivNodeIdM
 
     ztServFront <- Z.socket ctx Z.Router
     ztServFrontAdapter <- newSocketAdapter ztServFront
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
-    Z.bind ztServFront (ztNodeIdRouter ztOurPrivNodeId)
+    Z.bind ztServFront $ endpointTcp (pztIdHost ztOurPrivNodeId)
+                                     (pztIdRouterPort ztOurPrivNodeId)
 
     ztServPub <- Z.socket ctx Z.Pub
     ztServPubAdapter <- newSocketAdapter ztServPub
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServPub
-    Z.bind ztServPub (ztNodeIdPub ztOurPrivNodeId)
+    Z.bind ztServPub $ endpointTcp (pztIdHost ztOurPrivNodeId)
+                                   (pztIdPubPort ztOurPrivNodeId)
 
     ztListeners <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty

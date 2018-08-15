@@ -89,7 +89,11 @@ endpointTcp h p = "tcp://" <> h <> ":" <> show p
 
 -- | Convenient wrapper for host + two ports. This is
 -- later to be converted to 'ZTNodeId'.
-data PreZTNodeId = PreZTNodeId !String !Integer !Integer deriving (Eq, Ord, Show, Generic)
+data PreZTNodeId = PreZTNodeId
+    { pztIdHost       :: !String
+    , pztIdRouterPort :: !Integer
+    , pztIdPubPort    :: !Integer
+    } deriving (Eq, Ord, Show, Generic)
 
 -- | Parser of 'ZTNodeId' in form of "host:port1:port2".
 parsePreZTNodeId :: String -> Either String PreZTNodeId
@@ -117,7 +121,8 @@ data ZTNodeId = ZTNodeId
 
 instance Serialise ZTNodeId
 
--- | Creates a proper 'ZTNodeId' from 'PreZTNodeId'.
+-- | Creates a proper 'ZTNodeId' from 'PreZTNodeId'. The host inside should not
+-- be a wildcard, but a ip address or a domain name only.
 mkZTNodeId :: PreZTNodeId -> IO ZTNodeId
 mkZTNodeId (PreZTNodeId ztIdHost ztIdRouterPort ztIdPubPort) = do
     ztIdInternal <- resolveHost ztIdHost
