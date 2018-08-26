@@ -43,8 +43,8 @@ module Loot.Config.Record
        , sub
        ) where
 
-import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Default (Default (..))
+import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
 import Data.Vinyl.Lens (RecElem, rlens)
 import Data.Vinyl.TypeLevel (RIndex)
