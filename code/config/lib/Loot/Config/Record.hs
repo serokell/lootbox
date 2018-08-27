@@ -33,6 +33,7 @@ module Loot.Config.Record
        , ItemType
 
        , finalise
+       , finaliseDeferedUnsafe
        , complement
 
        , HasOption
@@ -166,6 +167,17 @@ finalise = toEither . finalise' ""
         = (:&)
       <$> (ItemSub <$> finalise' (prf <> itemSubLabel item <> ".") rec)
       <*> finalise' prf xs
+
+-- | Similar to 'finalise', but does not instantly fail if some options are
+-- missing, attempt to force them will fail instead.
+finaliseDeferedUnsafe :: forall is. LabelsKnown is
+                      => ConfigRec 'Partial is -> ConfigRec 'Final is
+finaliseDeferedUnsafe RNil = RNil
+finaliseDeferedUnsafe (item@(ItemOptionP opt) :& ps) =
+    let failureMsg = toText $ "Undefined config item: " <> itemOptionLabel item
+    in ItemOptionF (opt ?: error failureMsg) :& finaliseDeferedUnsafe ps
+finaliseDeferedUnsafe (ItemSub part :& ps) =
+    ItemSub (finaliseDeferedUnsafe part) :& finaliseDeferedUnsafe ps
 
 -- | Fill values absent in one config with values from another config.
 -- Useful when total config of default values exists.
