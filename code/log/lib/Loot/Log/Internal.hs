@@ -67,7 +67,7 @@ data Level
     | Notice    -- ^ Something that should be more noticable than 'Info'.
     | Warning   -- ^ Suspicious warning conditions.
     | Error     -- ^ Errors.
-    deriving (Eq, Generic, Show)
+    deriving (Eq, Ord, Generic, Show)
 
 
 -- | Logger name (namespace).
