@@ -281,7 +281,9 @@ runBroker = do
             i <- abs <$> randomIO
             atomically $ do
                 l <- Set.toList <$> readTVar ztPeers
-                pure $ l L.!! (i `mod` length l)
+                pure $ case l of
+                    [] -> Nothing
+                    _  -> Just $ l L.!! (i `mod` length l)
 
     let resolvePeer :: MonadIO m => ByteString -> m (Maybe ZTNodeId)
         resolvePeer nodeid = do
@@ -328,16 +330,18 @@ runBroker = do
                 ztCliLog Debug $ "Registered client " <> show clientId <> " subs " <> show newSubs
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
-            nodeId <- maybe choosePeer pure nodeIdM
+            (nodeIdFinal :: Maybe ZTNodeId) <-
+                maybe choosePeer (pure . Just) nodeIdM
 
-            -- this warning can be removed if speed is crucial
-            present <- atomically $ Set.member nodeId <$> readTVar ztPeers
-            unless present $ do
-                ztCliLog Warning $ "Sending message with type " <> show msgT <>
-                                   ", but client " <> show nodeId <> " is not our peer"
+            whenJust nodeIdFinal $ \nodeId -> do
+                -- this warning can be removed if speed is crucial
+                present <- atomically $ Set.member nodeId <$> readTVar ztPeers
+                unless present $ do
+                    ztCliLog Warning $ "Sending message with type " <> show msgT <>
+                                       ", but client " <> show nodeId <> " is not our peer"
 
-            Z.sendMulti ztCliBack $ NE.fromList $
-                [ztNodeConnectionIdUnsafe nodeId, "", unMsgType msgT] ++ msg
+                Z.sendMulti ztCliBack $ NE.fromList $
+                    [ztNodeConnectionIdUnsafe nodeId, "", unMsgType msgT] ++ msg
 
     let backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
