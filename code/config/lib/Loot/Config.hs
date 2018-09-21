@@ -10,6 +10,7 @@
 module Loot.Config
        ( module Loot.Config.Record
        , module Loot.Config.Lens
+       , module Loot.Config.CLI
 
        , Config
        , PartialConfig
@@ -19,6 +20,7 @@ module Loot.Config
 
 import Lens.Micro ((?~))
 
+import Loot.Config.CLI (OptParser, (.::), (.:<), (.<>))
 import Loot.Config.Lens
 import Loot.Config.Record ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, finalise, option,
                            sub)
