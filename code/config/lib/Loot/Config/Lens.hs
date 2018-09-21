@@ -1,3 +1,5 @@
+{- SPDX-License-Identifier: MPL-2.0 -}
+
 {-# LANGUAGE AllowAmbiguousTypes  #-}
 {-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE DataKinds            #-}
