@@ -35,6 +35,7 @@ module Loot.Config.Record
        , finalise
        , finaliseDeferredUnsafe
        , complement
+       , upcast
 
        , HasOption
        , option
@@ -46,7 +47,7 @@ module Loot.Config.Record
 import Data.Default (Default (..))
 import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
-import Data.Vinyl.Lens (RecElem, rlens)
+import Data.Vinyl.Lens (RecElem, rlens, rreplace, type (<:))
 import Data.Vinyl.TypeLevel (RIndex)
 import GHC.TypeLits (ErrorMessage ((:<>:), ShowType, Text), KnownSymbol, Symbol, TypeError,
                      symbolVal)
@@ -191,6 +192,14 @@ complement (ItemOptionP opt :& ps) (ItemOptionF sup :& fs)
     = ItemOptionF (fromMaybe sup opt) :& complement ps fs
 complement (ItemSub part :& ps) (ItemSub final :& fs)
     = ItemSub (complement part final) :& complement ps fs
+
+-- | Cast partial config to another partial config which is
+-- a superset of the former.
+upcast
+    :: (Monoid (ConfigRec 'Partial xs), ys <: xs)
+    => ConfigRec 'Partial ys
+    -> ConfigRec 'Partial xs
+upcast ys = rreplace ys mempty
 
 -----------------------
 -- Configuration lenses
