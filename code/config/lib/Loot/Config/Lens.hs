@@ -14,6 +14,7 @@ module Loot.Config.Lens
     ) where
 
 import Data.Vinyl (Label (..))
+import Data.Vinyl.TypeLevel (type (++))
 import GHC.TypeLits (ErrorMessage (Text), Symbol, TypeError)
 
 import Loot.Base.HasLens (HasLens (..))
@@ -22,12 +23,6 @@ import Loot.Config.Record
 ----------------------------------------------------------------------------
 -- Constraints
 ----------------------------------------------------------------------------
-
--- Because there is no publicly availble type family for list concatenation.
-type family (++) (as :: [k]) (bs :: [k]) :: [k] where
-    (++) a '[] = a
-    (++) '[] b = b
-    (++) (a ': as) bs = a ': (as ++ bs)
 
 type family RevList (a :: [k]) :: [k] where
     RevList '[] = '[]
