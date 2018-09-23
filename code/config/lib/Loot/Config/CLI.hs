@@ -1,12 +1,8 @@
-{- SPDX-License-Identifier: MPL-2.0 -}
+ -- SPDX-License-Identifier: MPL-2.0
 
-{-# OPTIONS_GHC -fno-warn-orphans #-}
-
-{-# LANGUAGE DataKinds        #-}
-{-# LANGUAGE KindSignatures   #-}
-{-# LANGUAGE OverloadedLabels #-}
-{-# LANGUAGE TypeOperators    #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds     #-}
+{-# LANGUAGE TypeFamilies  #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Utilities for reading configuration from command-line parameters.
 module Loot.Config.CLI
@@ -16,13 +12,11 @@ module Loot.Config.CLI
        , (.<>)
        ) where
 
-import Data.Vinyl (Label, Rec ((:&), RNil), type (<:))
-import Options.Applicative (Parser, auto, long, strOption, switch, value)
-import qualified Options.Applicative as Opt
 import Data.Default (Default (def))
+import Data.Vinyl (Label)
+import Options.Applicative (Parser, optional)
 
-import Loot.Config.Record ((:::), (::<), ConfigKind (Partial), ConfigRec, HasOption, HasSub,
-                           Item (ItemOptionP, ItemSub), ItemKind, option, sub)
+import Loot.Config.Record (ConfigKind (Partial), ConfigRec, HasOption, HasSub, option, sub)
 
 
 -- | Type alias for options parser
@@ -35,7 +29,7 @@ type OptParser cfg = Parser (ConfigRec 'Partial cfg)
     => Label l
     -> Parser v
     -> OptParser is
-l .:: p = (\v -> def & option l .~ Just v) <$> p
+l .:: p = (\v -> def & option l .~ v) <$> optional p
 infixr 6 .::
 
 -- | Combinator which declares a config parser which parses one
