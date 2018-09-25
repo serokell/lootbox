@@ -6,7 +6,10 @@ library:
   <<: *lib-common
 
   dependencies:
+    - lens
     - tagged
+    - template-haskell
+    - text
 
 tests:
   loot-base-test:
