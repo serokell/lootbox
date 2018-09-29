@@ -1,7 +1,4 @@
-{- This Source Code Form is subject to the terms of the Mozilla Public
- - License, v. 2.0. If a copy of the MPL was not distributed with this
- - file, You can obtain one at http://mozilla.org/MPL/2.0/.
- -}
+{- SPDX-License-Identifier: MPL-2.0 -}
 
 {-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE DataKinds            #-}
@@ -35,6 +32,7 @@ module Loot.Config.Record
        , finalise
        , finaliseDeferredUnsafe
        , complement
+       , upcast
 
        , HasOption
        , option
@@ -43,10 +41,10 @@ module Loot.Config.Record
        , sub
        ) where
 
-import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Default (Default (..))
+import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
-import Data.Vinyl.Lens (RecElem, rlens)
+import Data.Vinyl.Lens (RecElem, rlens, rreplace, type (<:))
 import Data.Vinyl.TypeLevel (RIndex)
 import GHC.TypeLits (ErrorMessage ((:<>:), ShowType, Text), KnownSymbol, Symbol, TypeError,
                      symbolVal)
@@ -191,6 +189,14 @@ complement (ItemOptionP opt :& ps) (ItemOptionF sup :& fs)
     = ItemOptionF (fromMaybe sup opt) :& complement ps fs
 complement (ItemSub part :& ps) (ItemSub final :& fs)
     = ItemSub (complement part final) :& complement ps fs
+
+-- | Cast partial config to another partial config which is
+-- a superset of the former.
+upcast
+    :: (Monoid (ConfigRec 'Partial xs), ys <: xs)
+    => ConfigRec 'Partial ys
+    -> ConfigRec 'Partial xs
+upcast ys = rreplace ys mempty
 
 -----------------------
 -- Configuration lenses

@@ -1,7 +1,4 @@
-{- This Source Code Form is subject to the terms of the Mozilla Public
- - License, v. 2.0. If a copy of the MPL was not distributed with this
- - file, You can obtain one at http://mozilla.org/MPL/2.0/.
- -}
+{- SPDX-License-Identifier: MPL-2.0 -}
 
 {-# LANGUAGE DataKinds     #-}
 {-# LANGUAGE TypeOperators #-}
@@ -10,6 +7,7 @@
 module Loot.Config
        ( module Loot.Config.Record
        , module Loot.Config.Lens
+       , module Loot.Config.CLI
 
        , Config
        , PartialConfig
@@ -19,9 +17,10 @@ module Loot.Config
 
 import Lens.Micro ((?~))
 
+import Loot.Config.CLI (OptParser, (.::), (.:<), (.<>))
 import Loot.Config.Lens
-import Loot.Config.Record ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, finalise, option,
-                           sub)
+import Loot.Config.Record ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, complement,
+                           finalise, finaliseDeferredUnsafe, option, sub, upcast)
 import Loot.Config.Yaml ()
 
 
