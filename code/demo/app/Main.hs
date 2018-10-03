@@ -15,8 +15,8 @@ import Monad.Capabilities (emptyCaps)
 
 import Loot.Config (finalise, option, sub)
 import Loot.Demo.Config (ConfigPart, defaultConfig)
-import Loot.Log (logDebug, logError, logInfo)
-import Loot.Log.Warper (withLogWarper)
+import Loot.Log.Caps (logDebug, logError, logInfo, withLogging)
+import Loot.Log.Impure.Warper (mkLoggingImpl)
 
 
 configPath :: FilePath
@@ -30,11 +30,13 @@ main = usingReaderT emptyCaps $ do
         Left os -> do
             -- Config could not be loaded, so we initialise default logging
             -- configuration, because it is better than nothing.
-            withLogWarper mempty $ do
+            loggingImpl <- mkLoggingImpl mempty
+            withLogging loggingImpl $ do
                 logError $ "Missing mandatory options: "+|listF os|+""
                 exitFailure
         Right cfg -> do
-            withLogWarper (cfg ^. option #logging) $ do
+            loggingImpl <- mkLoggingImpl (cfg ^. option #logging)
+            withLogging loggingImpl $ do
                 logDebug "Config loaded"
                 logInfo $ "Timeout: "+|cfg ^. option #timeout|+""
                 logInfo $ "Hostname: "+|cfg ^. sub #server . option #host|+""

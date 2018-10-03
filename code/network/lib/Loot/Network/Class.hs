@@ -65,6 +65,7 @@ module Loot.Network.Class
 
 import Control.Lens (makeLenses)
 import Data.Default (Default (..))
+import Fmt (Buildable (build), fmt, hexF)
 
 import Loot.Network.BiTQueue (BiTQueue (..))
 
@@ -80,10 +81,18 @@ import Loot.Network.BiTQueue (BiTQueue (..))
 type Content = [ByteString]
 
 -- | Bytestring describing the type of the subscription. The key.
-newtype Subscription = Subscription { unSubscription :: ByteString } deriving (Eq,Ord,Show,IsString)
+newtype Subscription = Subscription { unSubscription :: ByteString }
+    deriving (Eq, IsString, Ord, Show)
+
+instance Buildable Subscription where
+    build = fmt . hexF . unSubscription
 
 -- | Message type is characterized as a bytestring.
-newtype MsgType = MsgType { unMsgType :: ByteString } deriving (Eq,Ord,Show,IsString)
+newtype MsgType = MsgType { unMsgType :: ByteString }
+    deriving (Eq, IsString, Ord, Show)
+
+instance Buildable MsgType where
+    build = fmt . hexF . unMsgType
 
 ----------------------------------------------------------------------------
 -- Client

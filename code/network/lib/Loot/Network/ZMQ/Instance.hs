@@ -18,51 +18,54 @@ module Loot.Network.ZMQ.Instance
     , registerListenerDefault
     ) where
 
-import Loot.Base.HasLens (HasLens (..), HasLens')
+import Loot.Base.HasLens (HasGetter, getterOf)
+import Loot.Log (MonadLogging)
+import UnliftIO (MonadUnliftIO)
+
 import qualified Loot.Network.Class as C
 import qualified Loot.Network.ZMQ.Client as ZC
 import Loot.Network.ZMQ.Common (ZTNodeId)
 import qualified Loot.Network.ZMQ.Server as ZS
 
-type ReaderIOM r m = (MonadReader r m, MonadIO m)
+type ReaderIOLogM r m = (MonadReader r m, MonadUnliftIO m, MonadLogging m)
 
 ----------------------------------------------------------------------------
 -- Client
 ----------------------------------------------------------------------------
 
-runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, MonadMask m) => m ()
+runClientDefault :: (ReaderIOLogM r m, HasGetter r ZC.ZTNetCliEnv, MonadMask m) => m ()
 runClientDefault = ZC.runBroker
 
-getPeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
+getPeersDefault :: (ReaderIOLogM r m, HasGetter r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
 getPeersDefault = ZC.getPeers
 
-updatePeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => ZC.ZTUpdatePeersReq -> m ()
+updatePeersDefault :: (ReaderIOLogM r m, HasGetter r ZC.ZTNetCliEnv) => ZC.ZTUpdatePeersReq -> m ()
 updatePeersDefault x = do
-    q <- ZC.ztCliRequestQueue <$> view (lensOf @ZC.ZTNetCliEnv)
+    q <- ZC.ztCliRequestQueue <$> view (getterOf @ZC.ZTNetCliEnv)
     ZC.updatePeers q x
 
 registerClientDefault ::
-       (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv)
+       (ReaderIOLogM r m, HasGetter r ZC.ZTNetCliEnv)
     => C.ClientId
     -> Set C.MsgType
     -> Set C.Subscription
     -> m ZC.ZTClientEnv
 registerClientDefault c m s = do
-    q <- ZC.ztCliRequestQueue <$> view (lensOf @ZC.ZTNetCliEnv)
+    q <- ZC.ztCliRequestQueue <$> view (getterOf @ZC.ZTNetCliEnv)
     ZC.registerClient q c m s
 
 ----------------------------------------------------------------------------
 -- Server
 ----------------------------------------------------------------------------
 
-runServerDefault :: (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv, MonadMask m) => m ()
+runServerDefault :: (ReaderIOLogM r m, HasGetter r ZS.ZTNetServEnv, MonadMask m) => m ()
 runServerDefault = ZS.runBroker
 
 registerListenerDefault ::
-       (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv)
+       (ReaderIOLogM r m, HasGetter r ZS.ZTNetServEnv)
     => C.ListenerId
     -> Set C.MsgType
     -> m ZS.ZTListenerEnv
 registerListenerDefault l m = do
-    q <- ZS.ztServRequestQueue <$> view (lensOf @ZS.ZTNetServEnv)
+    q <- ZS.ztServRequestQueue <$> view (getterOf @ZS.ZTNetServEnv)
     ZS.registerListener q l m

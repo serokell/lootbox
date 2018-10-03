@@ -1,9 +1,10 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ConstraintKinds     #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE DefaultSignatures   #-}
-{-# LANGUAGE TypeFamilies        #-}
-{-# LANGUAGE TypeOperators       #-}
+{-# LANGUAGE AllowAmbiguousTypes  #-}
+{-# LANGUAGE ConstraintKinds      #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DefaultSignatures    #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Basic "has" lenses, extracted from the 'ether' package.
 module Loot.Base.HasLens
@@ -34,11 +35,14 @@ class HasTaggedGetter tag s a | tag s -> a where
     default getterOf :: HasTaggedLens tag s s a a => SimpleGetter s a
     getterOf = lensOf @tag
 
-instance HasTaggedGetter a a a where
-    getterOf = id
+instance HasTaggedGetter a a a
 
-instance HasTaggedGetter t (Tagged t a) a where
-    getterOf = \f -> fmap coerce . f . coerce
+instance HasTaggedGetter t (Tagged t a) a
+
+instance HasTaggedGetter a (a, c) a
+
+instance HasTaggedGetter b (c, b) b
+
 
 type HasGetter s a = HasTaggedGetter a s a
 
@@ -56,6 +60,12 @@ instance HasTaggedLens t (Tagged t a) (Tagged t b) a b where
 type HasLens s t a b = HasTaggedLens a s t a b
 
 type HasLens' s a = HasLens s s a a
+
+instance HasTaggedLens a (a, c) (b, c) a b where
+    lensOf = _1
+
+instance HasTaggedLens a (c, a) (c, b) a b where
+    lensOf = _2
 
 
 type family HasLenses' s as :: Constraint where

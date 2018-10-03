@@ -17,7 +17,6 @@ module Loot.Network.ZMQ.Client
     ) where
 
 import Control.Concurrent (threadDelay)
-import qualified Control.Concurrent.Async as A
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
@@ -30,17 +29,21 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Fmt (hexF, listF, listF', (+|), (+||), (|+), (||+))
+import Loot.Log (MonadLogging, logDebug, logWarning)
 import System.Random (randomIO)
 import qualified Text.Show as T
+import UnliftIO (MonadUnliftIO)
+import qualified UnliftIO.Async as A
 
 import qualified System.ZMQ4 as Z
 
-import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Level (..), Logging (..), logNameSelL, _GivenName)
+import Loot.Base.HasLens (HasGetter, getterOf)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (whileM)
-import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription, ztLog,
+import Loot.Network.ZMQ.Adapter (SocketAdapter, adapterRelease, adapterTry, atLeastOne, canReceive,
+                                 newSocketAdapter)
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
                                 ztNodeConnectionIdUnsafe, ztNodeIdPub, ztNodeIdRouter)
 
 ----------------------------------------------------------------------------
@@ -171,32 +174,32 @@ data ZTNetCliEnv = ZTNetCliEnv
     , ztCliRequestQueue :: !(CliRequestQueue)
       -- ^ Queue to read (internal, administrative) client requests
       -- from, like updating peers or resetting connection.
-
-    , ztCliLogging      :: !(Logging IO)
-      -- ^ Logging function from global context.
     }
 
 -- | Creates client environment.
-createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
-createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
-    ztCliBack <- Z.socket ctx Z.Router
+createNetCliEnv
+    :: (MonadIO m, MonadLogging m)
+    => ZTGlobalEnv
+    -> Set ZTNodeId
+    -> m ZTNetCliEnv
+createNetCliEnv (ZTGlobalEnv ctx) peers = do
+    ztCliBack <- liftIO $ Z.socket ctx Z.Router
     ztCliBackAdapter <- newSocketAdapter ztCliBack
-    Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
-    forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
+    liftIO $ Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
+    forM_ peers $ liftIO . Z.connect ztCliBack . ztNodeIdRouter
 
-    ztCliSub <- Z.socket ctx Z.Sub
+    ztCliSub <- liftIO $ Z.socket ctx Z.Sub
     ztCliSubAdapter <- newSocketAdapter ztCliSub
-    forM_ peers $ Z.connect ztCliSub . ztNodeIdPub
-    Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
+    forM_ peers $ liftIO . Z.connect ztCliSub . ztNodeIdPub
+    liftIO $ Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
 
     ztClients <- newTVarIO mempty
     ztPeers <- newTVarIO mempty
     ztHeartbeatInfo <- newTVarIO mempty -- initialise it later
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
-    ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
+    ztCliRequestQueue <- CliRequestQueue <$> liftIO TQ.newTQueueIO
 
-    let ztCliLogging = ztLogging & logNameSelL . _GivenName %~ (<> "cli")
     let ztCliEnv = ZTNetCliEnv {..}
 
     changePeers ztCliEnv $ def & uprAdd .~ peers
@@ -211,9 +214,9 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
     adapterRelease ztCliSubAdapter
     Z.close ztCliSub
 
-changePeers :: MonadIO m => ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
-changePeers ZTNetCliEnv{..} req = liftIO $ do
-    curTime <- getCurrentTimeMS
+changePeers :: (MonadIO m, MonadLogging m) => ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
+changePeers ZTNetCliEnv{..} req = do
+    curTime <- liftIO $ getCurrentTimeMS
     (toConnect,toDisconnect) <- atomically $ do
         peers <- readTVar ztPeers
         let (toAdd,toDel) = applyUpdatePeers peers req
@@ -227,35 +230,36 @@ changePeers ZTNetCliEnv{..} req = liftIO $ do
             foldr (.) id (map (\nId -> at nId .~ Just initHbs) (Set.toList toAdd))
         pure (toAdd,toDel)
     forM_ toDisconnect $ \z -> do
-        ztLog ztCliLogging Debug $ "changePeers: disconnecting " <> show z
-        Z.disconnect ztCliBack $ ztNodeIdRouter z
-        Z.disconnect ztCliSub $ ztNodeIdPub z
+        logDebug $ "changePeers: disconnecting "+|z|+""
+        liftIO $ Z.disconnect ztCliBack $ ztNodeIdRouter z
+        liftIO $ Z.disconnect ztCliSub $ ztNodeIdPub z
     forM_ toConnect $ \z -> do
-        ztLog ztCliLogging Debug $ "changePeers: connecting " <> show z
-        Z.connect ztCliBack $ ztNodeIdRouter z
-        Z.connect ztCliSub $ ztNodeIdPub z
+        logDebug $ "changePeers: connecting "+|z|+""
+        liftIO $ Z.connect ztCliBack $ ztNodeIdRouter z
+        liftIO $ Z.connect ztCliSub $ ztNodeIdPub z
 
-reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
-reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
-    ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
+reconnectPeers :: (MonadIO m, MonadLogging m) => ZTNetCliEnv -> Set ZTNodeId -> m ()
+reconnectPeers ZTNetCliEnv{..} nIds = do
+    logWarning $ "Reconnecting peers: "+|listF nIds|+""
 
-    forM_ nIds $ \nId -> do
-        Z.disconnect ztCliBack (ztNodeIdRouter nId)
-        Z.connect ztCliBack (ztNodeIdRouter nId)
-        Z.disconnect ztCliSub (ztNodeIdPub nId)
-        Z.connect ztCliSub (ztNodeIdPub nId)
-    curTime <- getCurrentTimeMS
-    atomically $ do
-        let mulTwoMaybe x | x >= hbIntervalMax = x
-                          | otherwise = 2 * x
-        let upd Nothing = error "reconnectPeers: can't upd, got nothing"
-            upd (Just hbs) =
-                let newInterval = mulTwoMaybe (hbs ^. hbInterval)
-                in Just $ hbs & hbInactive .~ False
-                              & hbInterval .~ newInterval
-                              & hbNextPoll .~ (curTime + newInterval)
-        modifyTVar ztHeartbeatInfo $ \hbInfo ->
-            foldl' (\m nId -> m & at nId %~ upd) hbInfo nIds
+    liftIO $ do
+        forM_ nIds $ \nId -> do
+            Z.disconnect ztCliBack (ztNodeIdRouter nId)
+            Z.connect ztCliBack (ztNodeIdRouter nId)
+            Z.disconnect ztCliSub (ztNodeIdPub nId)
+            Z.connect ztCliSub (ztNodeIdPub nId)
+        curTime <- getCurrentTimeMS
+        atomically $ do
+            let mulTwoMaybe x | x >= hbIntervalMax = x
+                            | otherwise = 2 * x
+            let upd Nothing = error "reconnectPeers: can't upd, got nothing"
+                upd (Just hbs) =
+                    let newInterval = mulTwoMaybe (hbs ^. hbInterval)
+                    in Just $ hbs & hbInactive .~ False
+                                & hbInterval .~ newInterval
+                                & hbNextPoll .~ (curTime + newInterval)
+            modifyTVar ztHeartbeatInfo $ \hbInfo ->
+                foldl' (\m nId -> m & at nId %~ upd) hbInfo nIds
 
 ----------------------------------------------------------------------------
 -- Methods
@@ -267,16 +271,22 @@ data CliBrokerStmRes
     | CBSub
     | CBRequest InternalRequest deriving Show
 
-runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
+runBroker
+    :: ( MonadReader r m
+       , HasGetter r ZTNetCliEnv
+       , MonadUnliftIO m
+       , MonadMask m
+       , MonadLogging m
+       ) => m ()
 runBroker = do
-    cEnv@ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
+    cEnv@ZTNetCliEnv{..} <- view $ getterOf @ZTNetCliEnv
 
-    let ztCliLog = ztLog ztCliLogging
     -- This function may do something creative (LRU! Lowest ping!),
     -- but instead (for now) it'll just choose a random peer.
-    let choosePeer = do
+    let choosePeer :: MonadIO m => m ZTNodeId
+        choosePeer = do
             -- Yes, modulo bias. It shouldn't really matter.
-            i <- abs <$> randomIO
+            i <- abs <$> liftIO randomIO
             atomically $ do
                 l <- Set.toList <$> readTVar ztPeers
                 pure $ l L.!! (i `mod` length l)
@@ -291,11 +301,13 @@ runBroker = do
                 let toWrite = bReceiveQ <$> Map.lookup clientId cMap
                 whenJust toWrite $ \tq -> TQ.writeTQueue tq (nId,content)
                 pure $ isJust toWrite
-            unless res $ ztCliLog Warning $ "sendToClient: cId doesn't exist: " <> show clientId
+            unless res $
+                logWarning $ "sendToClient: cId doesn't exist: "+|hexF clientId|+""
 
     let onHeartbeat addr = liftIO $ updateHeartbeat ztHeartbeatInfo addr
 
-    let processReq = \case
+    let processReq :: (MonadIO m, MonadLogging m) => InternalRequest -> m ()
+        processReq = \case
             IRUpdatePeers req -> changePeers cEnv req
             IRReconnect nIds -> reconnectPeers cEnv nIds
             IRRegister clientId msgTs subs biQ -> do
@@ -322,37 +334,43 @@ runBroker = do
 
                     pure newSubs
                 let newSubs = either (\e -> error $ "Client IRRegister: " <> e) identity res
-                forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
-                ztCliLog Debug $ "Registered client " <> show clientId <> " subs " <> show newSubs
+                forM_ newSubs $ liftIO . Z.subscribe ztCliSub . unSubscription
+                logDebug $ "Registered client "+|hexF clientId|+" subs "+|listF newSubs|+""
 
-    let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
+    let clientToBackend
+            :: (MonadIO m, MonadLogging m)
+            => Maybe ZTNodeId -> (MsgType, [ByteString]) -> m ()
+        clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
             nodeId <- maybe choosePeer pure nodeIdM
 
             -- this warning can be removed if speed is crucial
             present <- atomically $ Set.member nodeId <$> readTVar ztPeers
-            unless present $ do
-                ztCliLog Warning $ "Sending message with type " <> show msgT <>
-                                   ", but client " <> show nodeId <> " is not our peer"
+            unless present $
+                logWarning $ "Sending message with type "+|msgT|+
+                    ", but client "+|nodeId|+" is not our peer"
 
-            Z.sendMulti ztCliBack $ NE.fromList $
+            liftIO $ Z.sendMulti ztCliBack $ NE.fromList $
                 [ztNodeConnectionIdUnsafe nodeId, "", unMsgType msgT] ++ msg
 
-    let backendToClients = \case
+    let backendToClients :: (MonadIO m, MonadLogging m) => [ByteString] -> m ()
+        backendToClients = \case
             (addr:"":msgT:msg) -> resolvePeer addr >>= \case
-                Nothing -> ztCliLog Warning $ "client btc: couldn't resolve peer: " <> show addr
+                Nothing -> logWarning $ "client btc: couldn't resolve peer: "+|hexF addr|+""
                 Just nodeId -> do
                     onHeartbeat nodeId
                     clientIdM <-
                         atomically $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
-                    maybe (ztCliLog Warning $ "backendToClients: couldn't find client " <>
+                    maybe (logWarning $ "backendToClients: couldn't find client " <>
                                               "with this message type")
                           (\clientId -> sendToClient clientId (nodeId, Response (MsgType msgT) msg))
                           clientIdM
-            other -> ztCliLog Warning $ "backendToClients: wrong format: " <> show other
+            other -> logWarning $ "backendToClients: wrong format: "+|listF' hexF other|+""
 
-    let subToClients = \case
+    let subToClients :: (MonadIO m, MonadLogging m) => [ByteString] -> m ()
+        subToClients = \case
             (k:addr:content) -> resolvePeer addr >>= \case
-                Nothing -> ztCliLog Warning $ "subToClients: couldn't resolve peer: " <> show addr
+                Nothing -> logWarning $ "subToClients: couldn't resolve peer: "+|
+                    hexF addr|+""
                 Just nodeId -> do
                     let k' = Subscription k
                     onHeartbeat nodeId
@@ -370,13 +388,15 @@ runBroker = do
                             -- client needs).
                             error $ "subToClients: Nobody got the subscription " <>
                                     "message for key " <> show k
-            other -> ztCliLog Warning $ "subToClients: wrong format: " <> show other
+            other -> logWarning $ "subToClients: wrong format: "+|
+                listF' hexF other|+""
 
-    liftIO $ A.withAsync (heartbeatWorker cEnv) $ const $ do
+    -- TODO: replace with a specifyc async combinator
+    A.withAsync (liftIO $ heartbeatWorker cEnv) $ const $ do
       let receiveBack = whileM (canReceive ztCliBack) $
-                        Z.receiveMulti ztCliBack >>= backendToClients
+                            liftIO (Z.receiveMulti ztCliBack) >>= backendToClients
       let receiveSub  = whileM (canReceive ztCliSub) $
-                        Z.receiveMulti ztCliSub >>= subToClients
+                            liftIO (Z.receiveMulti ztCliSub) >>= subToClients
       let action = do
               results <- atomically $ do
                   cMap <- readTVar ztClients
@@ -409,7 +429,7 @@ runBroker = do
       receiveSub
 
       forever action `catchAny`
-          (\e -> ztCliLog Warning $ "Client broker exited: " <> show e)
+          (\e -> logWarning $ "Client broker exited: "+||e||+"")
 
 ----------------------------------------------------------------------------
 -- Methods
@@ -417,8 +437,8 @@ runBroker = do
 
 -- | Retrieve peers we're connected to.
 getPeers ::
-       (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m) => m (Set ZTNodeId)
-getPeers = readTVarIO =<< (ztPeers <$> view (lensOf @ZTNetCliEnv))
+       (MonadReader r m, HasGetter r ZTNetCliEnv, MonadIO m) => m (Set ZTNodeId)
+getPeers = readTVarIO =<< (ztPeers <$> view (getterOf @ZTNetCliEnv))
 
 -- | Register a new client.
 registerClient ::

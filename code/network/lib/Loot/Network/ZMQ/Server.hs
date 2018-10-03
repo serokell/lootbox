@@ -17,7 +17,6 @@ module Loot.Network.ZMQ.Server
        ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async as A
 import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
@@ -25,18 +24,20 @@ import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
-import qualified Text.Show as T
-
 import qualified Data.Restricted as Z
+import Fmt (hexF, (+|), (+||), (|+), (||+))
+import Loot.Base.HasLens (HasGetter, getterOf)
+import Loot.Log (MonadLogging, logDebug, logWarning)
 import qualified System.ZMQ4 as Z
+import qualified Text.Show as T
+import UnliftIO (MonadUnliftIO)
+import UnliftIO.Async as A
 
-import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Level (..), Logging (..), logNameSelL, _GivenName)
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription, ztLog,
+import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription,
                                 ztNodeConnectionId, ztNodeIdPub, ztNodeIdRouter)
 
 
@@ -88,14 +89,11 @@ data ZTNetServEnv = ZTNetServEnv
 
     , ztServRequestQueue :: !ServRequestQueue
       -- ^ Request queue for server.
-
-    , ztServLogging      :: !(Logging IO)
-      -- ^ Logging function from global context.
     }
 
 -- | Creates server environment.
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
-createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
+createNetServEnv (ZTGlobalEnv ctx) ztOurNodeId = liftIO $ do
     ztServFront <- Z.socket ctx Z.Router
     ztServFrontAdapter <- newSocketAdapter ztServFront
     Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
@@ -109,7 +107,6 @@ createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId = liftIO $ do
     ztMsgTypes <- newTVarIO mempty
     ztServRequestQueue <- ServRequestQueue <$> TQ.newTQueueIO
 
-    let ztServLogging = ztLogging & logNameSelL . _GivenName %~ (<> "serv")
     pure ZTNetServEnv {..}
 
 -- | Terminates server environment.
@@ -126,15 +123,24 @@ data ServBrokerStmRes
     | SBRequest InternalRequest
     deriving (Show)
 
-runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
+runBroker
+    :: ( MonadReader r m
+       , HasGetter r ZTNetServEnv
+       , MonadUnliftIO m
+       , MonadMask m
+       , MonadLogging m
+       ) => m ()
 runBroker = do
-    ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
+    ZTNetServEnv{..} <- view $ getterOf @ZTNetServEnv
 
-    let publish k v =
-            Z.sendMulti ztServPub $
-            NE.fromList $ [unSubscription k,ztNodeConnectionId ztOurNodeId] ++ v
+    let publish :: MonadIO m => Subscription -> [ByteString] -> m ()
+        publish k v =
+            liftIO $ Z.sendMulti ztServPub
+                   $ NE.fromList
+                   $ [unSubscription k,ztNodeConnectionId ztOurNodeId] ++ v
 
-    let processReq (IRRegister listenerId msgTypes lEnv) = do
+    let processReq :: (MonadIO m, MonadLogging m) => InternalRequest -> m ()
+        processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
                 listenerRegistered <- Map.member listenerId <$> lift (readTVar ztListeners)
                 when listenerRegistered $ throwError "listener is already registered"
@@ -148,35 +154,39 @@ runBroker = do
                     lift $ modifyTVar ztMsgTypes $ Map.insert msgT listenerId
 
             whenLeft res $ \e -> error $ "Server IRRegister: " <> e
-            ztLog ztServLogging Debug $ "Registered listener " <> show listenerId
+            logDebug $ "Registered listener "+|hexF listenerId|+""
 
         processReq IRHeartBeat = publish heartbeatSubscription []
 
-    let processMsg = \case
+    let processMsg :: MonadIO m => ServSendMsg ZTCliId -> m ()
+        processMsg = \case
             Reply cId msgT msg ->
-                Z.sendMulti ztServFront $
-                NE.fromList $ [unZtCliId cId,"",unMsgType msgT] ++ msg
+                liftIO $ Z.sendMulti ztServFront
+                       $ NE.fromList
+                       $ [unZtCliId cId,"",unMsgType msgT] ++ msg
             Publish k v -> publish k v
 
-    let frontToListener = \case
+    let frontToListener :: (MonadIO m, MonadLogging m) => [ByteString] -> m ()
+        frontToListener = \case
             (cId:"":msgT:msg) -> do
                 ztEnv <- atomically $ runMaybeT $ do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
                 case ztEnv of
-                  Nothing  -> ztLog ztServLogging Warning "frontToListener: can't resolve msgT"
+                  Nothing  -> logWarning "frontToListener: can't resolve msgT"
                   Just biQ ->
                       atomically $ TQ.writeTQueue (bReceiveQ biQ)
                                                   (ZTCliId cId, MsgType msgT, msg)
-            _ -> ztLog ztServLogging Warning "frontToListener: wrong format"
+            _ -> logWarning "frontToListener: wrong format"
 
     let hbWorker = forever $ do
             let heartbeatInterval = 300000 -- 300 ms
             threadDelay heartbeatInterval
             atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
-    liftIO $ A.withAsync hbWorker $ const $ do
-      let action = liftIO $ do
+    A.withAsync (liftIO hbWorker) $ const $ do
+        let action :: (MonadIO m, MonadLogging m) => m ()
+            action = do
               results <- atomically $ do
                   lMap <- readTVar ztListeners
                   let readReq =
@@ -196,9 +206,9 @@ runBroker = do
                   SBRequest r         -> processReq r
                   SBListener _lId msg -> processMsg msg
                   SBFront             -> whileM (canReceive ztServFront) $
-                                         Z.receiveMulti ztServFront >>= frontToListener
-      forever action `catchAny`
-          (\e -> ztLog ztServLogging Warning $ "Server broker exited: " <> show e)
+                                             liftIO (Z.receiveMulti ztServFront) >>= frontToListener
+        forever action `catchAny`
+            (\e -> logWarning $ "Server broker exited: "+||e||+"")
 
 registerListener ::
        (MonadReader r m, MonadIO m)

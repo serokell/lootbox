@@ -15,7 +15,7 @@ module Loot.Demo.Config
        ) where
 
 import Loot.Config ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, option, (?~))
-import Loot.Log.Warper (LoggerConfig)
+import Loot.Log.Impure.Warper (LoggerConfig)
 
 
 -- | Our configuration contains:

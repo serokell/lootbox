@@ -12,6 +12,7 @@ library:
     - data-default
     - dependent-map
     - dependent-sum
+    - fmt
     - lens
     - lifted-async
     - loot-base
@@ -26,6 +27,7 @@ library:
     - tagged
     - time
     - text
+    - unliftio
     - unordered-containers
     - zeromq4-haskell
 

@@ -11,11 +11,13 @@ import qualified Control.Concurrent.Async.Lifted as A
 import Control.Lens (makeLenses)
 import Data.Default (def)
 import qualified Data.Set as Set
-import Loot.Log.Internal (Name)
+import qualified Data.Text as T
+import Fmt ((+|), (|+))
+import Loot.Base.HasLens (HasTaggedGetter (..), HasTaggedLens (..))
+import Loot.Log (LogContext, LoggingImpl, event, level, tags, withLogTag)
+import Loot.Log.Rio ()
 import System.IO.Unsafe (unsafePerformIO)
 
-import Loot.Base.HasLens (HasLens (..))
-import Loot.Log.Internal (Logging (..), NameSelector (GivenName))
 import Loot.Network.BiTQueue (recvBtq, sendBtq)
 import Loot.Network.Class
 import Loot.Network.ZMQ
@@ -29,19 +31,29 @@ data BigState = BigState
     { _bsCli  :: ZTNetCliEnv
     , _bsServ :: ZTNetServEnv
     , _bsCtx  :: ZTGlobalEnv
+
+    , _bsLoggingImpl:: LoggingImpl IO
+    , _bsLogCtx     :: LogContext
     }
 
 makeLenses ''BigState
 
 
-instance HasLens ZTNetCliEnv BigState ZTNetCliEnv where
-    lensOf = bsCli
+instance HasTaggedGetter ZTNetCliEnv BigState ZTNetCliEnv where
+    getterOf = bsCli
 
-instance HasLens ZTNetServEnv BigState ZTNetServEnv where
-    lensOf = bsServ
+instance HasTaggedGetter ZTNetServEnv BigState ZTNetServEnv where
+    getterOf = bsServ
 
-instance HasLens ZTGlobalEnv BigState ZTGlobalEnv where
-    lensOf = bsCtx
+instance HasTaggedGetter ZTGlobalEnv BigState ZTGlobalEnv where
+    getterOf = bsCtx
+
+instance HasTaggedGetter (LoggingImpl IO) BigState (LoggingImpl IO) where
+    getterOf = bsLoggingImpl
+
+instance HasTaggedGetter LogContext BigState LogContext
+instance HasTaggedLens LogContext BigState BigState LogContext LogContext where
+    lensOf = bsLogCtx
 
 type Env a = ReaderT BigState IO a
 
@@ -66,21 +78,23 @@ lMVar :: MVar ()
 lMVar = unsafePerformIO $ newMVar ()
 
 log :: MonadIO m => Text -> m ()
-log x = do
-    liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
+log x = liftIO $
+    withMVar lMVar $ \() -> putTextLn x
 
-withZMQ :: Name -> ZTNodeId -> Set ZTNodeId -> Env () -> Env () -> IO ()
-withZMQ name nId peers server action = do
-    let logFoo l n t = log $ "[" <> show l <> "] " <> show n <> ": " <> t
-    let logging = Logging logFoo (pure $ GivenName name)
-    withZTGlobalEnv logging $ \ztEnv -> do
-        cliEnv <- createNetCliEnv ztEnv peers
-        servEnv <- createNetServEnv ztEnv nId
-        let execute = flip runReaderT (BigState cliEnv servEnv ztEnv) $
+loggingImpl :: MonadIO m => LoggingImpl m
+loggingImpl ctx r = log msg
+  where
+    msg = "["+|r^.level|+"] "+|T.intercalate ":" (ctx^.tags)|+": "+|r^.event|+""
+
+withZMQ :: ZTNodeId -> Set ZTNodeId -> Env () -> Env () -> IO ()
+withZMQ nId peers server action = withZTGlobalEnv $ \ztEnv -> do
+    cliEnv <- createNetCliEnv ztEnv peers
+    servEnv <- createNetServEnv ztEnv nId
+    let execute = flip runReaderT (BigState cliEnv servEnv ztEnv loggingImpl mempty) $
                       void $ A.withAsync server $ const $
                       void $ A.withAsync runClient $ const $
                       action
-        execute `finally` (termNetCliEnv cliEnv >> termNetServEnv servEnv)
+    execute `finally` (termNetCliEnv cliEnv >> termNetServEnv servEnv)
 
 testZmq :: IO ()
 testZmq = do
@@ -106,7 +120,7 @@ testZmq = do
                         threadDelay 10000000
                         log "server: *restarting*"
                     runServer @ZmqTcp
-            withZMQ "n1" n1 mempty servWithCancel $ do
+            withZMQ n1 mempty servWithCancel $ withLogTag "n1" $ do
                 log "server: *starting*"
                 biQ1 <- registerListener @ZmqTcp "ponger" (Set.fromList ["ping"])
                 biQ2 <- registerListener @ZmqTcp "publisher" mempty
@@ -127,7 +141,7 @@ testZmq = do
                     x <- atomically $ recvBtq biQ
                     log $ "subreader: got " <> show x
 
-            withZMQ "n2" n2 (Set.singleton n1) runServer $ do
+            withZMQ n2 (Set.singleton n1) runServer $ withLogTag "n2" $ do
                 log "client: *starting*"
                 -- biq2 is also subscribed to blocks but will discard them, just to test
                 -- that subs are propagated properly

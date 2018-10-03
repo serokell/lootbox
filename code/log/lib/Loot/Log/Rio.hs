@@ -1,45 +1,47 @@
--- | Helpers for defining instances in "ReaderT over IO" approach to monad
--- stack.
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE UndecidableInstances #-}
 
+-- | Logging interface for RIO-style monad stacks.
+--
+-- If your monad @m@ is isomorphic to @ReaderT ctx IO@, you can obtain an instance
+-- of 'MonadLoggingWithContext'. For this you need to:
+--
+-- 1. Make sure that your @ctx@ contains @'LoggingImpl' IO@.
+-- 2. Provide a 'HasTaggedGetter' instance for locating the @LoggingImpl@ in your @ctx@.
+-- 3. Provide a 'HasTaggedLens' instance for locating @LogContext@ in your @ctx@.
+--
+-- In case there is no place in your monad stack to store the logging context,
+-- you can (while it is not advised) use ''Loot.Log.Rio.NoContext'' instead.
 module Loot.Log.Rio
-    ( LoggingIO
-    , defaultLog
-    , defaultLogName
-    , defaultModifyLogNameSel
+    ( rioEmit
+
+    , rioAskLogCtx
+    , rioLocalLogCtx
+
+    , module Loot.Log
     ) where
 
-import Lens.Micro (to)
-import Loot.Base.HasLens (HasLens', lensOf)
+import Loot.Base.HasLens (HasGetter, HasLens')
 
-import Loot.Log.Internal (Level, Logging (..), Name, NameSelector, logNameSelL)
+import Loot.Log
+import Loot.Log.Internal.Context (LogContext, MonadHasLogContext (..))
+import Loot.Log.Internal.Core (MonadLogging (..))
+import Loot.Log.Rio.Internal (rioAskLogCtx, rioEmit, rioLocalLogCtx)
 
--- | We provide default implementations for @LoggingIO@ because it facilitates
--- movement of logging capability between different monads (and also we will
--- hardly have logging which requires something more complex than 'IO').
--- Use 'hoistLogging' to lift this to required monad.
-type LoggingIO = Logging IO
 
--- | Default implementation of 'MonadLogging.log' (generated with 'makeCap').
-defaultLog
-    :: forall m ctx.
-       (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
-    => Level -> Name -> Text -> m ()
-defaultLog l n t = do
-    lg <- view (lensOf @LoggingIO . to _log) <$> ask
-    liftIO $ lg l n t
+--
+-- Orphan instances for RIO
+--
 
--- | Default implementation of 'MonadLogging.logName' (generated with
--- 'makeCap').
-defaultLogName
-    :: forall m ctx.
-       (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
-    => m NameSelector
-defaultLogName = view (lensOf @LoggingIO) >>= liftIO . _logName
+instance ( HasGetter ctx (LoggingImpl IO)
+         , HasGetter ctx LogContext
+         , MonadReader ctx m
+         , MonadIO m
+         ) => MonadLogging m where
+    emit = rioEmit
 
--- | Default implementation of 'modifyLogNameSel' method.
-defaultModifyLogNameSel
-    :: forall m ctx a.
-       (HasLens' ctx LoggingIO, MonadReader ctx m)
-    => (NameSelector -> NameSelector) -> m a -> m a
-defaultModifyLogNameSel f =
-    local (lensOf @LoggingIO . logNameSelL %~ f)
+instance ( HasLens' ctx LogContext
+         , MonadReader ctx m
+         ) => MonadHasLogContext m where
+    askLogCtx = rioAskLogCtx
+    localLogCtx = rioLocalLogCtx

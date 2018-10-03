@@ -3,6 +3,7 @@ resolver: snapshot.yaml
 packages:
   - code/base
   - code/config
+  - code/crio
   - code/crypto
   - code/log
   - code/network

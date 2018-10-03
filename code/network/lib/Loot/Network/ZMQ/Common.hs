@@ -7,8 +7,6 @@ module Loot.Network.ZMQ.Common
 
     , ZTGlobalEnv(..)
     , ztContext
-    , ztLogging
-    , ztLog
 
     , ztGlobalEnv
     , ztGlobalEnvRelease
@@ -26,17 +24,14 @@ module Loot.Network.ZMQ.Common
     , heartbeatSubscription
     ) where
 
-import Prelude hiding (log)
-
 import Codec.Serialise (Serialise)
 import Control.Lens (makeLenses)
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List as L
 import qualified Data.Restricted as Z
-import GHC.Stack (HasCallStack, callStack)
+import Fmt (Buildable (build), (+|), (|+))
 import qualified System.ZMQ4 as Z
 
-import Loot.Log.Internal (Level, Logging (..), selectLogName)
 import Loot.Network.Class (Subscription (..))
 
 
@@ -46,15 +41,14 @@ data ZmqTcp
 -- | Global environment needed for client/server initialisation.
 data ZTGlobalEnv = ZTGlobalEnv
     { _ztContext :: Z.Context
-    , _ztLogging :: Logging IO
     }
 
 makeLenses ''ZTGlobalEnv
 
 
 -- | Acquire 'ZTGlobalEnv'.
-ztGlobalEnv :: MonadIO m => Logging IO -> m ZTGlobalEnv
-ztGlobalEnv _ztLogging = do
+ztGlobalEnv :: MonadIO m => m ZTGlobalEnv
+ztGlobalEnv = do
     _ztContext <- liftIO Z.context
     pure $ ZTGlobalEnv{..}
 
@@ -63,20 +57,12 @@ ztGlobalEnvRelease :: MonadIO m => ZTGlobalEnv -> m ()
 ztGlobalEnvRelease = liftIO . Z.term . _ztContext
 
 -- | Bracket for 'ZTGlobalEnv'
-withZTGlobalEnv ::
-       (MonadMask m, MonadIO m)
-    => Logging IO
-    -> (ZTGlobalEnv -> m a)
+withZTGlobalEnv
+    :: (MonadMask m, MonadIO m)
+    => (ZTGlobalEnv -> m a)
     -> m a
-withZTGlobalEnv logFunc action =
-    bracket (ztGlobalEnv logFunc) ztGlobalEnvRelease action
-
--- | Logging function for zmq -- doesn't require any monad, uses
--- 'Logging IO' directly.
-ztLog :: HasCallStack => Logging IO -> Level -> Text -> IO ()
-ztLog Logging{..} level t = do
-    name <- selectLogName callStack <$> _logName
-    _log level name t
+withZTGlobalEnv action =
+    bracket ztGlobalEnv ztGlobalEnvRelease action
 
 -- | Generic tcp address creation helper.
 endpointTcp :: String -> Integer -> String
@@ -88,6 +74,9 @@ data ZTNodeId = ZTNodeId
     , ztIdRouterPort :: !Integer -- ^ Port for ROUTER socket.
     , ztIdPubPort    :: !Integer -- ^ Port for PUB socket.
     } deriving (Eq, Ord, Show, Generic)
+
+instance Buildable ZTNodeId where
+    build ZTNodeId{..} = ""+|ztIdHost|+":"+|ztIdRouterPort|+"+"+|ztIdPubPort|+""
 
 instance Serialise ZTNodeId
 

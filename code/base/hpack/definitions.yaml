@@ -35,6 +35,8 @@ _definitions:
         - TemplateHaskell
         - TupleSections
         - TypeApplications
+        - TypeFamilies
+        - TypeOperators
         - ViewPatterns
 
     - &dependencies

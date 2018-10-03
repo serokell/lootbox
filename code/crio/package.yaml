@@ -1,40 +1,34 @@
 <<: !include "../base/hpack/lib.yaml"
 
-name: loot-log
+name: loot-crio
 
 library:
   <<: *lib-common
 
   dependencies:
-    - aeson
-    - caps
-    - fmt
-    - generic-deriving
     - loot-base
-    - loot-crio
     - loot-prelude
-    - log-warper
-    - microlens
-    - microlens-th
+    - HList
     - mtl
+    - safe-exceptions
+    - singletons
     - text
+
+    # caps:
+    - exceptions
+    - template-haskell
+    - transformers
+    - typerep-map
 
 tests:
   loot-log-test:
     <<: *test-common
 
     dependencies:
-      - loot-log
+      - loot-crio
 
       - hedgehog
       - tasty
       - tasty-discover
       - tasty-hedgehog
       - tasty-hunit
-
-      - caps
-      - fmt
-      - loot-base
-      - loot-prelude
-      - microlens
-      - text

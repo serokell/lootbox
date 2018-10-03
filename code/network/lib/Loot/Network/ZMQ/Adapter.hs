@@ -114,8 +114,8 @@ atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
 -- | Checks if data can be received from the socket. Use @whileM
 -- canReceive process@ pattern after the STM action on the needed
 -- socket.
-canReceive :: Z.Socket t -> IO Bool
-canReceive sock = elem Z.In <$> Z.events sock
+canReceive :: MonadIO m => Z.Socket t -> m Bool
+canReceive sock = elem Z.In <$> liftIO (Z.events sock)
 
 
 {-
