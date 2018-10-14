@@ -30,3 +30,4 @@ tests:
       - tasty-hunit
 
       - aeson
+      - optparse-applicative
