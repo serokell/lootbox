@@ -9,8 +9,8 @@ module Loot.Config.CLI
        ( ModParser
        , OptModParser
        , modifying
-       , setP
-       , (<.>)
+       , (..:)
+       , (<*<)
        , (.::)
        , (%::)
        , (.:<)
@@ -50,9 +50,9 @@ And here is a valid parser for this config:
 @
 cfgParser :: OptModParser Config
 cfgParser =
-    #heh  .:: switch (long "heh") <.>
+    #heh  .:: switch (long "heh") <*<
     #taks .:<
-       (#chto  .:: strOption (long "chto") <.>
+       (#chto  .:: strOption (long "chto") <*<
         #u_nas .:: switch (long "u_nas"))
 @
 
@@ -60,9 +60,9 @@ Note that options "mda" and "taks.tut" are omitted
 from parser's definition. This means that these options
 will not be included in the partial config produced by the parser.
 -}
-(<.>) :: ModParser a -> ModParser a -> ModParser a
-p <.> q = (.) <$> p <*> q
-infixl 5 <.>
+(<*<) :: Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
+(<*<) = liftA2 (.)
+infixl 5 <*<
 
 -- | Creates a trivial modifying parser which just replaces original
 -- value with given one.
@@ -71,8 +71,9 @@ modifying = fmap const
 
 -- | Creates a parser which sets a given value using a `Setter` (usually a
 -- `Lens` to another type).
-setP :: ASetter' a b -> Parser b -> ModParser a
-setP = fmap . set
+(..:) :: ASetter' a b -> Parser b -> ModParser a
+(..:) = fmap . set
+infixr 6 ..:
 
 -- | Type alias for a parser which yields config modifier
 type OptModParser cfg = ModParser (ConfigRec 'Partial cfg)
@@ -94,7 +95,8 @@ infixr 6 .::
     => Label l
     -> ModParser v
     -> OptModParser is
-l %:: p = (\f -> option l %~ fmap f) <$> p
+l %:: p = (\mf -> option l %~ fmap (fromMaybe id mf)) <$> optional p
+infixr 6 %::
 
 -- | Combinator which declares a config parser which parses one
 -- subsection, leaving other options empty.
