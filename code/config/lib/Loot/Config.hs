@@ -17,7 +17,7 @@ module Loot.Config
 
 import Lens.Micro ((?~))
 
-import Loot.Config.CLI
+import Loot.Config.CLI (OptParser, (.::), (.:<), (.<>))
 import Loot.Config.Lens
 import Loot.Config.Record ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, complement,
                            finalise, finaliseDeferredUnsafe, option, sub, upcast)
