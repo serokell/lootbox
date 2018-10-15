@@ -9,6 +9,7 @@ module Loot.Config.CLI
        ( ModParser
        , OptModParser
        , modifying
+       , uplift
        , (..:)
        , (.%:)
        , (<*<)
@@ -17,7 +18,7 @@ module Loot.Config.CLI
        , (.:<)
        ) where
 
-import Data.Vinyl (Label)
+import Data.Vinyl (Label, type (<:), rreplace, rcast)
 import Lens.Micro (ASetter')
 import Options.Applicative (Parser, optional)
 
@@ -114,3 +115,10 @@ infixr 6 %::
     -> OptModParser is
 l .:< p = (\uf cfg -> cfg & sub l %~ uf) <$> p
 infixr 6 .:<
+
+-- | Lifts the modifier of a subconfig to a modifier of larger config.
+uplift
+    :: forall is us. (is <: us)
+    => OptModParser is
+    -> OptModParser us
+uplift = fmap $ \f cfg -> rreplace (f $ rcast cfg) cfg
