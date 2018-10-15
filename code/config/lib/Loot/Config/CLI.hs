@@ -10,6 +10,7 @@ module Loot.Config.CLI
        , OptModParser
        , modifying
        , (..:)
+       , (.%:)
        , (<*<)
        , (.::)
        , (%::)
@@ -72,8 +73,14 @@ modifying = fmap const
 -- | Creates a parser which sets a given value using a `Setter` (usually a
 -- `Lens` to another type).
 (..:) :: ASetter' a b -> Parser b -> ModParser a
-(..:) = fmap . set
+l ..: p = maybe id (set l) <$> optional p
 infixr 6 ..:
+
+-- | Creates a parser which modifies a given value using a `Setter` (usually a
+-- `Lens` to another type).
+(.%:) :: ASetter' a b -> ModParser b -> ModParser a
+l .%: p = maybe id (over l) <$> optional p
+infixr 6 .%:
 
 -- | Type alias for a parser which yields config modifier
 type OptModParser cfg = ModParser (ConfigRec 'Partial cfg)
