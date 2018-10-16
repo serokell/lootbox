@@ -15,6 +15,7 @@ library:
     - microlens
     - mtl
     - text
+    - time
 
 tests:
   loot-base-test:
