@@ -10,11 +10,16 @@ library:
     - caps
     - dlist
     - fmt
+    - hslogger
     - loot-base
     - log-warper
     - microlens
+    - microlens-th
     - mtl
+    - network
     - text
+    - unordered-containers
+    - yaml
 
 tests:
   loot-base-test:

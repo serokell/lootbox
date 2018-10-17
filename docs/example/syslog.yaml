@@ -1,0 +1,52 @@
+# Configuration example for `loot-log` Syslog
+# Every options has a default value, so you can set as many of them as you like.
+
+loggers-tree:
+    # Every value under "loggers-tree" is a logger and is specified by its name
+    main:
+        # Where the receiving syslog server is located, default is "auto".
+        destination:
+            destination-type: auto
+        # Configuration example for the two other options (with respective defaults):
+        #destination:
+        #    destination-type: remote
+        #    family: AF_INET
+        #    hostname: localhost
+        #    port-number: 514
+        #
+        #destination:
+        #    destination-type: local
+        #    fifo-path: "/dev/log"
+
+        # You can set a unit name, but it's not necessary. Default is unset.
+        # If unset, this logger hierarchical name will be set
+        unit-name: haskellapp
+
+        # Whether to use process IDs or not in output messages, default is true
+        withPID: true
+
+        # Whether or not to output messages to stderr too, default is false
+        withPERROR: true
+
+        # A Facility, used by the system to select messages destination, default is USER.
+        # The list of all available possibilities is here:
+        # hackage.haskell.org/package/hslogger/docs/System-Log-Handler-Syslog.html#t:Facility
+        facility: USER
+
+        # The minimum accepted severity level: anything below this will be ignored.
+        # In ascending order: Debug, Info, Notice, Warning and Error. Default is Warning.
+        min-level: Debug
+
+        # A list of loggers that are children of this one.
+        sub-loggers:
+            deep:
+                unit-name: haskellDeep
+                min-level: Debug
+
+    # If you don't want to use them, you can avoid to specify loggers in the
+    # middle of the hierarchy by using the dot-notation
+    # NOTE: if a logger in the hierarchy is specified more than once, all its
+    # configurations will work
+    run.init:
+        unit-name: initializer
+        min-level: Notice
