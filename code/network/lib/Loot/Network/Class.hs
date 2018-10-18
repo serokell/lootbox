@@ -80,10 +80,14 @@ import Loot.Network.BiTQueue (BiTQueue (..))
 type Content = [ByteString]
 
 -- | Bytestring describing the type of the subscription. The key.
-newtype Subscription = Subscription { unSubscription :: ByteString } deriving (Eq,Ord,Show,IsString)
+newtype Subscription = Subscription
+    { unSubscription :: ByteString
+    } deriving (Eq, Ord, Show, IsString)
 
 -- | Message type is characterized as a bytestring.
-newtype MsgType = MsgType { unMsgType :: ByteString } deriving (Eq,Ord,Show,IsString)
+newtype MsgType = MsgType
+    { unMsgType :: ByteString
+    } deriving (Eq, Ord, Show, IsString)
 
 ----------------------------------------------------------------------------
 -- Client
@@ -91,8 +95,8 @@ newtype MsgType = MsgType { unMsgType :: ByteString } deriving (Eq,Ord,Show,IsSt
 
 -- | Request to update peers
 data UpdatePeersReq nId = UpdatePeersReq
-    { _uprAdd :: Set nId -- ^ Peers to add/connect.
-    , _uprDel :: Set nId -- ^ Peers to delete/disconnect.
+    { _uprAdd :: [nId] -- ^ Peers to add/connect.
+    , _uprDel :: [nId] -- ^ Peers to delete/disconnect.
     } deriving (Show, Generic)
 
 makeLenses ''UpdatePeersReq

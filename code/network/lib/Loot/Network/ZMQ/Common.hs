@@ -4,49 +4,151 @@
 
 module Loot.Network.ZMQ.Common
     ( ZmqTcp
+    , ztLog
+    , heartbeatSubscription
+    , endpointTcp
+
+    , ZTNodeId(..)
+    , parseZTNodeId
+    , ZTInternalId (..)
+
+    , PeersInfoVar
+    , pivConnected
+    , pivConnecting
+    , peersToSend
+    , peersRevMap
 
     , ZTGlobalEnv(..)
     , ztContext
     , ztLogging
-    , ztLog
-
     , ztGlobalEnv
     , ztGlobalEnvRelease
     , withZTGlobalEnv
-
-    , endpointTcp
-
-    , PreZTNodeId(..)
-    , parsePreZTNodeId
-    , ZTNodeId(..)
-    , mkZTNodeId
-
-    , ztNodeIdRouter
-    , ztNodeIdPub
-    , ztNodeConnectionId
-    , ztNodeConnectionIdUnsafe
-
-    , heartbeatSubscription
     ) where
 
 import Prelude hiding (log)
 
 import Codec.Serialise (Serialise)
 import Control.Lens (makeLenses)
-import qualified Data.ByteString.Char8 as BS8
+import qualified Data.HashMap.Strict as HMap
+import qualified Data.HashSet as HSet
 import qualified Data.List as L
-import qualified Data.Restricted as Z
 import GHC.Stack (HasCallStack, callStack)
-import Network.BSD (getHostByName, hostAddress)
-import Network.Socket (inet_ntoa)
 import qualified System.ZMQ4 as Z
 
 import Loot.Log.Internal (Level, Logging (..), selectLogName)
 import Loot.Network.Class (Subscription (..))
+import Loot.Network.ZMQ.Adapter (SocketAdapter)
 
+
+----------------------------------------------------------------------------
+-- Common functions
+----------------------------------------------------------------------------
 
 -- | Networking tag type for ZMQ over TCP.
 data ZmqTcp
+
+-- | Key for heartbeat subscription.
+heartbeatSubscription :: Subscription
+heartbeatSubscription = Subscription "_hb"
+
+-- | Logging function for zmq -- doesn't require any monad, uses
+-- 'Logging IO' directly.
+ztLog :: HasCallStack => Logging IO -> Level -> Text -> IO ()
+ztLog Logging{..} level t = do
+    name <- selectLogName callStack <$> _logName
+    _log level name t
+
+-- | Generic tcp address creation helper.
+endpointTcp :: String -> Integer -> String
+endpointTcp h p = "tcp://" <> h <> ":" <> show p
+
+----------------------------------------------------------------------------
+-- Node identifiers
+----------------------------------------------------------------------------
+
+-- | NodeId as seen in ZMQ TCP.
+data ZTNodeId = ZTNodeId
+    { ztIdHost       :: !String  -- ^ Host, can be domain name or ip address.
+                                 -- This is what user specifies and it's used for
+                                 -- logging only. Internal code uses internal id.
+    , ztIdRouterPort :: !Integer -- ^ Port for ROUTER socket.
+    , ztIdPubPort    :: !Integer -- ^ Port for PUB socket.
+    } deriving (Eq, Ord, Show, Generic)
+
+instance Serialise ZTNodeId
+instance Hashable ZTNodeId
+
+-- | Parser of 'ZTNodeId' in form of "host:port1:port2".
+parseZTNodeId :: String -> Either String ZTNodeId
+parseZTNodeId s = case splitBy ':' s of
+    [ztHost,p1,p2] ->
+        case (readMaybe p1, readMaybe p2) of
+            (Just port1, Just port2) -> Right $ ZTNodeId ztHost port1 port2
+            _                        -> Left "Can't parse either of the ports"
+    _            -> Left "String should have expactly two columns"
+  where
+    splitBy :: Eq a => a -> [a] -> [[a]]
+    splitBy _ [] = []
+    splitBy d s' = x : splitBy d (drop 1 y) where (x,y) = L.span (/= d) s'
+
+-- | The internal zmq identifier we use to address nodes in ROUTER.
+newtype ZTInternalId = ZTInternalId
+    { unZTInternalId :: ByteString
+    } deriving (Eq, Ord, Show, Generic)
+
+instance Hashable ZTInternalId
+
+----------------------------------------------------------------------------
+-- Manipulating peers
+----------------------------------------------------------------------------
+
+-- | Peers info variable, shared between client and server. It
+-- represents a single united map, so an implicit predicate is that
+-- the same node id can't be the key in more than one field of the
+-- record.
+--
+-- Peer can be either in the connected state which is what you
+-- expect usually, or in a transitive "connecting" state. The latter
+-- one has the tag when the connection was tried to be established so
+-- we can abort if the connection takes too long.
+--
+-- Also, as 'ZTInternalId's are used to index peers when sending info
+-- to them, they must be all distinct as well.
+data PeersInfoVar = PeersInfoVar
+    { _pivConnected  :: TVar (HashMap ZTNodeId ZTInternalId)
+    -- ^ Peers we're connected to.
+    , _pivConnecting :: TVar (HashMap ZTNodeId (Integer, Z.Socket Z.Dealer, SocketAdapter))
+    -- ^ Argument is POSIX representation of connection attempt time.
+    }
+
+makeLenses ''PeersInfoVar
+
+-- | Returns the hashset of peers we send data to.
+peersToSend :: PeersInfoVar -> STM (HashSet ZTInternalId)
+peersToSend piv = do
+    plist <- HMap.elems <$> readTVar (piv ^. pivConnected)
+    let p = HSet.fromList plist
+    when (HSet.size p /= length plist) $
+        error $ "peersToSend: values collision: " <> show plist
+    pure p
+
+-- TODO it's defined here b/c for performance reasons it'd be better
+-- to have it in peersInfoVar too and not build from scratch every
+-- time.
+-- | Build a reverse peers map (for peer resolving).
+peersRevMap :: PeersInfoVar -> STM (HashMap ZTInternalId ZTNodeId)
+peersRevMap piv = do
+    l <- map swap . HMap.toList <$> readTVar (piv ^. pivConnected)
+    let res = HMap.fromList l
+
+    when (HMap.size res /= length l) $
+        error $ "peersRevMap: values collision" <> show l
+    pure res
+
+----------------------------------------------------------------------------
+-- Zeromq global context
+----------------------------------------------------------------------------
 
 -- | Global environment needed for client/server initialisation.
 data ZTGlobalEnv = ZTGlobalEnv
@@ -75,94 +177,3 @@ withZTGlobalEnv ::
     -> m a
 withZTGlobalEnv logFunc action =
     bracket (ztGlobalEnv logFunc) ztGlobalEnvRelease action
-
--- | Logging function for zmq -- doesn't require any monad, uses
--- 'Logging IO' directly.
-ztLog :: HasCallStack => Logging IO -> Level -> Text -> IO ()
-ztLog Logging{..} level t = do
-    name <- selectLogName callStack <$> _logName
-    _log level name t
-
--- | Generic tcp address creation helper.
-endpointTcp :: String -> Integer -> String
-endpointTcp h p = "tcp://" <> h <> ":" <> show p
-
--- | Convenient wrapper for host + two ports. This is
--- later to be converted to 'ZTNodeId'.
-data PreZTNodeId = PreZTNodeId
-    { pztIdHost       :: !String
-    , pztIdRouterPort :: !Integer
-    , pztIdPubPort    :: !Integer
-    } deriving (Eq, Ord, Show, Generic)
-
--- | Parser of 'ZTNodeId' in form of "host:port1:port2".
-parsePreZTNodeId :: String -> Either String PreZTNodeId
-parsePreZTNodeId s = case splitBy ':' s of
-    [ztHost,p1,p2] ->
-        case (readMaybe p1, readMaybe p2) of
-            (Just port1, Just port2) -> Right $ PreZTNodeId ztHost port1 port2
-            _                        -> Left "Can't parse either of the ports"
-    _            -> Left "String should have expactly two columns"
-  where
-    splitBy :: Eq a => a -> [a] -> [[a]]
-    splitBy _ [] = []
-    splitBy d s' = x : splitBy d (drop 1 y) where (x,y) = L.span (/= d) s'
-
--- | NodeId as seen in ZMQ TCP.
-data ZTNodeId = ZTNodeId
-    { ztIdHost       :: !String  -- ^ Host, can be domain name or ip address.
-                                 -- This is what user specifies and it's used for
-                                 -- logging only. Internal code uses internal id.
-    , ztIdInternal   :: !String  -- ^ IP address, must match the resolved host.
-                                 -- It is used as a node identifier.
-    , ztIdRouterPort :: !Integer -- ^ Port for ROUTER socket.
-    , ztIdPubPort    :: !Integer -- ^ Port for PUB socket.
-    } deriving (Eq, Ord, Show, Generic)
-
-instance Serialise ZTNodeId
-
--- | Creates a proper 'ZTNodeId' from 'PreZTNodeId'. The host inside should not
--- be a wildcard, but a ip address or a domain name only.
-mkZTNodeId :: PreZTNodeId -> IO ZTNodeId
-mkZTNodeId (PreZTNodeId ztIdHost ztIdRouterPort ztIdPubPort) = do
-    ztIdInternal <- resolveHost ztIdHost
-    pure $ ZTNodeId {..}
-  where
-    -- Resolves given host. This is needed to unify nodes' identifiers -- all
-    -- socket ids are IPv4 addresses, not hosts.
-    resolveHost :: String -> IO String
-    resolveHost address = do
-        ent <- getHostByName address
-        inet_ntoa (hostAddress ent)
-
--- | Address of the server's ROUTER/frontend socket.
-ztNodeIdRouter :: ZTNodeId -> String
-ztNodeIdRouter ZTNodeId{..} = endpointTcp ztIdInternal ztIdRouterPort
-
--- | Address of the server's PUB socket.
-ztNodeIdPub :: ZTNodeId -> String
-ztNodeIdPub ZTNodeId{..} = endpointTcp ztIdInternal ztIdPubPort
-
--- TODO Make unsafe version of this function maybe.
--- | Agreed standard of server identities public nodes must set on
--- their ROUTER frontend. Identifiers are size limited -- this
--- function errors if it's not possible to create a valid id from the
--- given ZTNodeId. You can wrap it again using 'Z.restrict'.
-ztNodeConnectionId :: ZTNodeId -> ByteString
-ztNodeConnectionId zId = -- ZTNodeId{..} =
-    let sid = ztNodeConnectionIdUnsafe zId
-    in Z.rvalue $
-       fromMaybe (error $ "ztNodeConnectionId: restriction check failed " <> show sid) $
-       (Z.toRestricted sid :: Maybe (Z.Restricted (Z.N1, Z.N254) ByteString))
-
--- | Unsafe variant of 'ztNodeConnectionId' which doesn't check
--- whether string is empty or too long.
-ztNodeConnectionIdUnsafe :: ZTNodeId -> ByteString
-ztNodeConnectionIdUnsafe ZTNodeId{..} =
-    -- Yes, we use host:frontendPort, it doesn't seem to have
-    -- any downsides.
-    BS8.pack $ endpointTcp ztIdInternal ztIdRouterPort
-
--- | Key for heartbeat subscription.
-heartbeatSubscription :: Subscription
-heartbeatSubscription = Subscription "_hb"

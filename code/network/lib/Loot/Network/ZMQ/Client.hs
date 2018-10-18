@@ -25,6 +25,8 @@ import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
 import Data.Default (def)
+import qualified Data.HashMap.Strict as HMap
+import qualified Data.HashSet as HSet
 import qualified Data.List as L
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
@@ -40,8 +42,7 @@ import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), logNameSe
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (ZTGlobalEnv (..), ZTNodeId (..), heartbeatSubscription, ztLog,
-                                ztNodeConnectionIdUnsafe, ztNodeIdPub, ztNodeIdRouter)
+import Loot.Network.ZMQ.Common
 
 ----------------------------------------------------------------------------
 -- Heartbeats
@@ -123,15 +124,40 @@ instance T.Show InternalRequest where
     show (IRRegister cId _ _ _) = "IRRegister " <> show cId
     show (IRReconnect nids)     = "IRReconnect" <> show nids
 
-applyUpdatePeers ::
-       Set ZTNodeId -> ZTUpdatePeersReq -> (Set ZTNodeId, Set ZTNodeId)
-applyUpdatePeers peers (UpdatePeersReq {..}) = do
-    let both = _uprDel `Set.intersection` _uprAdd
-    let add' = (_uprAdd `Set.difference` both) `Set.difference` peers
-    let del' = (_uprDel `Set.difference` both) `Set.intersection` peers
-    (add',del')
+-- | Get hashmap keys as a hashset.
+hmKeys :: HashMap k a -> HashSet k
+hmKeys = HSet.fromMap . fmap (const ())
 
-newtype CliRequestQueue = CliRequestQueue { unCliRequestQueue :: TQueue InternalRequest }
+applyUpdatePeers ::
+       PeersInfoVar
+    -> ZTUpdatePeersReq
+    -> STM ([ZTNodeId], [ZTNodeId])
+applyUpdatePeers piv UpdatePeersReq{..} = do
+    -- Normalising the request
+    let both = L.nub $ _uprDel `L.intersect` _uprAdd
+    let add' = L.nub _uprAdd L.\\ both
+    let del' = L.nub _uprDel L.\\ both
+
+    -- Processing
+    nowConnected <- readTVar $ piv ^. pivConnected
+    nowConnecting <- readTVar $ piv ^. pivConnecting
+    let allConnected = HSet.toList $ hmKeys nowConnected `HSet.union` hmKeys nowConnecting
+    -- We're adding all peers asked which were not connect(ed/ing)
+    let toAdd = add' L.\\ allConnected
+
+    -- And deleting all who are not connected. Another semantics would
+    -- be to disconnect only those who are connected, but we also
+    -- disconnect connectING peers as well.
+    let toDel = del' L.\\ allConnected
+
+    let res = (toAdd, toDel)
+    when (toAdd `L.intersect` toDel /= []) $
+        error $ "applyUpdatePeers: malformed response: " <> show res
+    pure res
+
+newtype CliRequestQueue = CliRequestQueue
+    { unCliRequestQueue :: TQueue InternalRequest
+    }
 
 ----------------------------------------------------------------------------
 -- Context
@@ -168,7 +194,7 @@ data ZTNetCliEnv = ZTNetCliEnv
     , ztMsgTypes        :: !(TVar (Map MsgType ClientId))
       -- ^ Map from msg type key to clents' identifiers.
 
-    , ztCliRequestQueue :: !(CliRequestQueue)
+    , ztCliRequestQueue :: !CliRequestQueue
       -- ^ Queue to read (internal, administrative) client requests
       -- from, like updating peers or resetting connection.
 
@@ -177,16 +203,14 @@ data ZTNetCliEnv = ZTNetCliEnv
     }
 
 -- | Creates client environment.
-createNetCliEnv :: MonadIO m => ZTGlobalEnv -> Set ZTNodeId -> m ZTNetCliEnv
+createNetCliEnv :: MonadIO m => ZTGlobalEnv -> [ZTNodeId] -> m ZTNetCliEnv
 createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     ztCliBack <- Z.socket ctx Z.Router
     ztCliBackAdapter <- newSocketAdapter ztCliBack
     Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
-    forM_ peers $ Z.connect ztCliBack . ztNodeIdRouter
 
     ztCliSub <- Z.socket ctx Z.Sub
     ztCliSubAdapter <- newSocketAdapter ztCliSub
-    forM_ peers $ Z.connect ztCliSub . ztNodeIdPub
     Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
 
     ztClients <- newTVarIO mempty
