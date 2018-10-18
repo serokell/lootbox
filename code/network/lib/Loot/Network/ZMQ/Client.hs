@@ -44,6 +44,54 @@ import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common
 
+
+----------------------------------------------------------------------------
+-- Manipulating peers
+----------------------------------------------------------------------------
+
+-- | Peers info variable, shared between client and server. It
+-- represents a single united map, so an implicit predicate is that
+-- the same node id can't be the key in more than one field of the
+-- record.
+--
+-- Peer can be either in the connected state which is what you
+-- expect usually, or in a transitive "connecting" state. The latter
+-- one has the tag when the connection was tried to be established so
+-- we can abort if the connection takes too long.
+--
+-- Also, as 'ZTInternalId's are used to index peers when sending info
+-- to them, they must be all distinct as well.
+data PeersInfoVar = PeersInfoVar
+    { _pivConnected  :: TVar (HashMap ZTNodeId ZTInternalId)
+    -- ^ Peers we're connected to.
+    , _pivConnecting :: TVar (HashMap ZTNodeId (Integer, Z.Socket Z.Dealer, SocketAdapter))
+    -- ^ Argument is POSIX representation of connection attempt time.
+    }
+
+makeLenses ''PeersInfoVar
+
+-- | Returns the hashset of peers we send data to.
+peersToSend :: PeersInfoVar -> STM (HashSet ZTInternalId)
+peersToSend piv = do
+    plist <- HMap.elems <$> readTVar (piv ^. pivConnected)
+    let p = HSet.fromList plist
+    when (HSet.size p /= length plist) $
+        error $ "peersToSend: values collision: " <> show plist
+    pure p
+
+-- TODO it's defined here b/c for performance reasons it'd be better
+-- to have it in peersInfoVar too and not build from scratch every
+-- time.
+-- | Build a reverse peers map (for peer resolving).
+peersRevMap :: PeersInfoVar -> STM (HashMap ZTInternalId ZTNodeId)
+peersRevMap piv = do
+    l <- map swap . HMap.toList <$> readTVar (piv ^. pivConnected)
+    let res = HMap.fromList l
+
+    when (HMap.size res /= length l) $
+        error $ "peersRevMap: values collision" <> show l
+    pure res
+
 ----------------------------------------------------------------------------
 -- Heartbeats
 ----------------------------------------------------------------------------
@@ -180,9 +228,8 @@ data ZTNetCliEnv = ZTNetCliEnv
     , ztCliSubAdapter   :: !SocketAdapter
       -- ^ Socket adapter for backend socket.
 
-    , ztPeers           :: !(TVar (Set ZTNodeId))
-      -- ^ List of peers we are connected to. Is to be updated by the
-      -- main thread only (broker worker).
+    , ztPeers           :: !PeersInfoVar
+      -- ^ Information about peers.
     , ztHeartbeatInfo   :: !(TVar (Map ZTNodeId HBState))
       -- ^ Information about connection and current heartbeating
       -- state.
@@ -204,17 +251,18 @@ data ZTNetCliEnv = ZTNetCliEnv
 
 -- | Creates client environment.
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> [ZTNodeId] -> m ZTNetCliEnv
-createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
-    ztCliBack <- Z.socket ctx Z.Router
+createNetCliEnv ztGlobalEnv@ZTGlobalEnv{..} peers = liftIO $ do
+    ztCliBack <- Z.socket ztContext Z.Router
     ztCliBackAdapter <- newSocketAdapter ztCliBack
     Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
 
-    ztCliSub <- Z.socket ctx Z.Sub
+    ztCliSub <- Z.socket ztContext Z.Sub
     ztCliSubAdapter <- newSocketAdapter ztCliSub
     Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
 
     ztClients <- newTVarIO mempty
-    ztPeers <- newTVarIO mempty
+    ztPeers <- PeersInfoVar <$> newTVarIO HMap.empty
+                            <*> newTVarIO HMap.empty
     ztHeartbeatInfo <- newTVarIO mempty -- initialise it later
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
@@ -225,7 +273,7 @@ createNetCliEnv (ZTGlobalEnv ctx ztLogging) peers = liftIO $ do
     let ztCliLogging = ztLogging & logNameSelL %~ modGivenName
     let ztCliEnv = ZTNetCliEnv {..}
 
-    changePeers ztCliEnv $ def & uprAdd .~ peers
+    changePeers ztGlobalEnv ztCliEnv $ def & uprAdd .~ peers
 
     pure ztCliEnv
 
@@ -237,30 +285,88 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
     adapterRelease ztCliSubAdapter
     Z.close ztCliSub
 
-changePeers :: MonadIO m => ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
-changePeers ZTNetCliEnv{..} req = liftIO $ do
+changePeers :: MonadIO m => ZTGlobalEnv -> ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
+changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
     curTime <- getCurrentTimeMS
-    (toConnect,toDisconnect) <- atomically $ do
-        peers <- readTVar ztPeers
-        let (toAdd,toDel) = applyUpdatePeers peers req
-        let peers' = (peers `Set.difference` toDel) `Set.union` toAdd
-        writeTVar ztPeers $! peers'
-        -- 2 seconds heuristical delay before heartbeating worker
-        -- starts noticing these nodes.
-        let initHbs = HBState hbIntervalMin hbLivenessMax (curTime + 2000) False
-        modifyTVar ztHeartbeatInfo $
-            foldr (.) id (map (\nId -> at nId .~ Nothing) (Set.toList toDel)) .
-            foldr (.) id (map (\nId -> at nId .~ Just initHbs) (Set.toList toAdd))
-        pure (toAdd,toDel)
-    forM_ toDisconnect $ \z -> do
-        ztLog ztCliLogging Info $ "changePeers: disconnecting " <> show z
-        Z.disconnect ztCliBack $ ztNodeIdRouter z
-        Z.disconnect ztCliSub $ ztNodeIdPub z
-    forM_ toConnect $ \z -> do
-        ztLog ztCliLogging Info $ "changePeers: connecting " <> show z
-        Z.connect ztCliBack $ ztNodeIdRouter z
-        Z.connect ztCliSub $ ztNodeIdPub z
 
+    -- We pre-create sockets to use them in the STM. The number may be
+    -- slightly more than the real number used (due to the possibly
+    -- incorrect request), but we'll cleanup right after.
+    sockets <- replicateM (length $ req ^. uprAdd) (Z.socket ztContext Z.Dealer)
+    adapters <- mapM newSocketAdapter sockets
+
+    (toConnect,toDisconnect) <- atomically $ do
+        -- Process request
+        (toAdd,toDel) <- applyUpdatePeers ztPeers req
+
+        -- Modify actual variables content.
+        modifyTVar (ztPeers ^. pivConnected) $! \p ->
+            p `HMap.difference` HMap.fromList (map (,()) toDel)
+        let addInfo = map (\(s,a) -> (curTime,s,a)) $ sockets `zip` adapters
+        modifyTVar (ztPeers ^. pivConnecting) $! \p ->
+            p `HMap.union` HMap.fromList (toAdd `zip` addInfo)
+
+        -- Remove them from the heartbeating worker.
+        modifyTVar ztHeartbeatInfo $
+            foldr (.) id (map (\nId -> at nId .~ Nothing) toDel)
+
+        -- Initialise related heartbeating context
+        pure (toAdd,toDel)
+
+    forM_ toDisconnect $ \z -> Z.disconnect ztCliBack $ ztNodeIdRouter z
+    unless (null toDisconnect) $
+        ztLog ztCliLogging Info $ "changePeers: disconnected " <> show toDisconnect
+    unless (null toConnect) $ do
+        -- We connect all dealer sockets and send a connection request
+        -- message.
+        forM_ (toConnect `zip` sockets) $ \(z,d) -> do
+            Z.connect ztCliSub $ ztNodeIdRouter z
+            Z.connect d $ ztNodeIdRouter z
+            Z.sendMulti d $ NE.fromList ["","getid"]
+        ztLog ztCliLogging Debug $
+            "changePeers: preconnecting (sending req) to " <> show toConnect
+
+    -- Release sockes that were not used.
+    let dataLeft = drop (length toConnect) $ sockets `zip` adapters
+    forM_ dataLeft $ \(sock,adapter) -> Z.close sock >> adapterRelease adapter
+
+-- | Continue connection request.
+contConnectionReq :: ZTGlobalEnv -> ZTNetCliEnv -> ZTNodeId -> ZTInternalId -> IO ()
+contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
+    curTime <- getCurrentTimeMS
+    resourcesM <- atomically $ do
+        connected <- HMap.toList <$> readTVar (ztPeers ^. pivConnected)
+        let clash = isJust $ find (\(_,iId') -> iId' == iId) connected
+        if clash
+        then pure Nothing
+        else do
+            (_,sock,adapter) <-
+                fromMaybe (error $ "contConnectionReq: cant find by nodeId") .
+                HMap.lookup nodeId <$>
+                readTVar (ztPeers ^. pivConnecting)
+            modifyTVar (ztPeers ^. pivConnected) $ HMap.insert nodeId iId
+            modifyTVar (ztPeers ^. pivConnecting) $ HMap.delete nodeId
+
+            -- 2 seconds heuristical delay before heartbeating worker
+            -- starts noticing these nodes.
+            let initHbs = HBState hbIntervalMin hbLivenessMax (curTime + 2000) False
+            modifyTVar ztHeartbeatInfo $ at nodeId .~ Just initHbs
+
+            pure $ Just (sock,adapter)
+
+    let onNothing =
+            ztLog ztCliLogging Warning $
+                "contConnectionReq: internal identity " <>
+                "collision, didn't connect peer with iid" <> show nodeId
+    let onJust (sock,adapter) = do
+            Z.close sock
+            adapterRelease adapter
+            ztLog ztCliLogging Debug $
+                "contConnectionReq: successfully connected to :" <> show nodeId
+    maybe onNothing onJust resourcesM
+
+-- | Given the set of nodeIDs it disconnects them and connects them
+-- back, doubling their heartbeating interval.
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
     ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
@@ -283,6 +389,34 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
         modifyTVar ztHeartbeatInfo $ \hbInfo ->
             foldl' (\m nId -> m & at nId %~ upd) hbInfo nIds
 
+-- | This worker cleans up connection attempts that were stuck.
+connectionsTimeoutWorker :: Logging IO -> PeersInfoVar -> IO ()
+connectionsTimeoutWorker logging piv =
+    forever $ action `catchAny` handler
+  where
+    -- TODO this must be configurable.
+    connectionTimeoutMS = 10000000
+    action = forever $ do
+        threadDelay 50000
+        curTime <- getCurrentTimeMS
+        let predicate (_,(created,_,_)) = created + connectionTimeoutMS < curTime
+        disconnected <- atomically $ do
+            prev <- readTVar (piv ^. pivConnecting)
+            let (stay,leave) = L.partition predicate (HMap.toList prev)
+            writeTVar (piv ^. pivConnecting) (HMap.fromList stay)
+            pure leave
+        unless (null disconnected) $ do
+            ztLog logging Warning $
+                "Connecting attemp timeouted for peers: " <>
+                show (map fst disconnected)
+            forM_ disconnected $ \(_,(_,sock,adapter)) ->
+                Z.close sock >> adapterRelease adapter
+    handler e = do
+        ztLog logging Error $
+            "Connections timeout worker failed: " <> show e <>
+            ", restarting in 2s"
+        threadDelay 2000000
+
 ----------------------------------------------------------------------------
 -- Methods
 ----------------------------------------------------------------------------
@@ -291,20 +425,25 @@ data CliBrokerStmRes
     = CBClient ClientId (Maybe ZTNodeId) (MsgType, Content)
     | CBBack
     | CBSub
+    | CBDealer ZTNodeId (Z.Socket Z.Dealer)
     | CBRequest InternalRequest deriving Show
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
+    gEnv@ZTGlobalEnv{..} <- view $ lensOf @ZTGlobalEnv
     cEnv@ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
 
     let ztCliLog = ztLog ztCliLogging
+
     -- This function may do something creative (LRU! Lowest ping!),
     -- but instead (for now) it'll just choose a random peer.
-    let choosePeer = do
+    let choosePeer :: IO (Maybe (ZTNodeId, ZTInternalId))
+        choosePeer = do
             -- Yes, modulo bias. It shouldn't really matter.
             i <- abs <$> randomIO
             atomically $ do
-                l <- Set.toList <$> readTVar ztPeers
+                -- We only choose a peer from "connected" list.
+                l <- HMap.toList <$> readTVar (ztPeers ^. pivConnected)
                 pure $ case l of
                     [] -> Nothing
                     _  -> Just $ l L.!! (i `mod` length l)

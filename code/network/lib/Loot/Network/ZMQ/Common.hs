@@ -3,24 +3,22 @@
 -- | Common ZMQ TCP types and functions.
 
 module Loot.Network.ZMQ.Common
-    ( ZmqTcp
+    (
+      -- | Misc
+      ZmqTcp
     , ztLog
     , heartbeatSubscription
     , endpointTcp
 
+      -- | Node identities
     , ZTNodeId(..)
     , parseZTNodeId
+    , ztNodeIdRouter
+    , ztNodeIdPub
     , ZTInternalId (..)
 
-    , PeersInfoVar
-    , pivConnected
-    , pivConnecting
-    , peersToSend
-    , peersRevMap
-
+      -- | Global environment
     , ZTGlobalEnv(..)
-    , ztContext
-    , ztLogging
     , ztGlobalEnv
     , ztGlobalEnvRelease
     , withZTGlobalEnv
@@ -29,17 +27,12 @@ module Loot.Network.ZMQ.Common
 import Prelude hiding (log)
 
 import Codec.Serialise (Serialise)
-import Control.Lens (makeLenses)
-import qualified Data.HashMap.Strict as HMap
-import qualified Data.HashSet as HSet
 import qualified Data.List as L
 import GHC.Stack (HasCallStack, callStack)
 import qualified System.ZMQ4 as Z
 
 import Loot.Log.Internal (Level, Logging (..), selectLogName)
 import Loot.Network.Class (Subscription (..))
-import Loot.Network.ZMQ.Adapter (SocketAdapter)
-
 
 ----------------------------------------------------------------------------
 -- Common functions
@@ -92,6 +85,14 @@ parseZTNodeId s = case splitBy ':' s of
     splitBy _ [] = []
     splitBy d s' = x : splitBy d (drop 1 y) where (x,y) = L.span (/= d) s'
 
+-- | Address of the server's ROUTER/frontend socket.
+ztNodeIdRouter :: ZTNodeId -> String
+ztNodeIdRouter ZTNodeId{..} = endpointTcp ztIdHost ztIdRouterPort
+
+-- | Address of the server's PUB socket.
+ztNodeIdPub :: ZTNodeId -> String
+ztNodeIdPub ZTNodeId{..} = endpointTcp ztIdHost ztIdPubPort
+
 -- | The internal zmq identifier we use to address nodes in ROUTER.
 newtype ZTInternalId = ZTInternalId
     { unZTInternalId :: ByteString
@@ -100,74 +101,24 @@ newtype ZTInternalId = ZTInternalId
 instance Hashable ZTInternalId
 
 ----------------------------------------------------------------------------
--- Manipulating peers
-----------------------------------------------------------------------------
-
--- | Peers info variable, shared between client and server. It
--- represents a single united map, so an implicit predicate is that
--- the same node id can't be the key in more than one field of the
--- record.
---
--- Peer can be either in the connected state which is what you
--- expect usually, or in a transitive "connecting" state. The latter
--- one has the tag when the connection was tried to be established so
--- we can abort if the connection takes too long.
---
--- Also, as 'ZTInternalId's are used to index peers when sending info
--- to them, they must be all distinct as well.
-data PeersInfoVar = PeersInfoVar
-    { _pivConnected  :: TVar (HashMap ZTNodeId ZTInternalId)
-    -- ^ Peers we're connected to.
-    , _pivConnecting :: TVar (HashMap ZTNodeId (Integer, Z.Socket Z.Dealer, SocketAdapter))
-    -- ^ Argument is POSIX representation of connection attempt time.
-    }
-
-makeLenses ''PeersInfoVar
-
--- | Returns the hashset of peers we send data to.
-peersToSend :: PeersInfoVar -> STM (HashSet ZTInternalId)
-peersToSend piv = do
-    plist <- HMap.elems <$> readTVar (piv ^. pivConnected)
-    let p = HSet.fromList plist
-    when (HSet.size p /= length plist) $
-        error $ "peersToSend: values collision: " <> show plist
-    pure p
-
--- TODO it's defined here b/c for performance reasons it'd be better
--- to have it in peersInfoVar too and not build from scratch every
--- time.
--- | Build a reverse peers map (for peer resolving).
-peersRevMap :: PeersInfoVar -> STM (HashMap ZTInternalId ZTNodeId)
-peersRevMap piv = do
-    l <- map swap . HMap.toList <$> readTVar (piv ^. pivConnected)
-    let res = HMap.fromList l
-
-    when (HMap.size res /= length l) $
-        error $ "peersRevMap: values collision" <> show l
-    pure res
-
-----------------------------------------------------------------------------
--- Zeromq global context
+-- Zeromq global environment
 ----------------------------------------------------------------------------
 
 -- | Global environment needed for client/server initialisation.
 data ZTGlobalEnv = ZTGlobalEnv
-    { _ztContext :: Z.Context
-    , _ztLogging :: Logging IO
+    { ztContext :: Z.Context
+    , ztLogging :: Logging IO
     }
-
-makeLenses ''ZTGlobalEnv
-
 
 -- | Acquire 'ZTGlobalEnv'.
 ztGlobalEnv :: MonadIO m => Logging IO -> m ZTGlobalEnv
-ztGlobalEnv _ztLogging = do
-    _ztContext <- liftIO Z.context
+ztGlobalEnv ztLogging = do
+    ztContext <- liftIO Z.context
     pure $ ZTGlobalEnv{..}
 
 -- | Release 'ZTGlobalEnv'.
 ztGlobalEnvRelease :: MonadIO m => ZTGlobalEnv -> m ()
-ztGlobalEnvRelease = liftIO . Z.term . _ztContext
+ztGlobalEnvRelease = liftIO . Z.term . ztContext
 
 -- | Bracket for 'ZTGlobalEnv'
 withZTGlobalEnv ::
