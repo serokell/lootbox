@@ -1,20 +1,18 @@
 {- |
 
-Reexports from ZMQ* modules, also documentation.
+Reexports from ZMQ* modules, also providing the documentation.
 
 Implementation
 ==============
 
 Implementation follows ZMQ Guide (http://zguide.zeromq.org/page:all#toc111)
 and, in particular, some relevant patterns:
-* "Nasty freelancer" pattern with ids equal to hosts (tcp://something:dealerPort)
-  for ROUTER (cli back) <-> ROUTER (serv front) connection. Implies that
-  clients don't have ID.
-  https://rfc.zeromq.org/spec:10/FLP/
 * "Pub/Sub Message Envelopes". Messages are three+ frames, first one is
   key, second is address, third+ is data.
   http://zguide.zeromq.org/page:all#toc49
 * One-way heartbeating using PUB/SUB (because it's a recommended way)
+* Instead of suggested "nasty freelancer" pattern our nodes exchange do
+  the handshake where server communicates its identity to the client.
 
 Server:
 * Binds to two ports: ROUTER and PUSH
@@ -30,12 +28,14 @@ Client:
   and propagates them to backend, which sends them to the network.
   Broker also gets messages from the PULL and propagates them to
   a worker that "subscribed" to this kind of update.
-
+* Every time we need to connect to some server, we open a DEALER socket,
+  ask server's ROUTER for his zmq identity, disconnect and destroy this
+  DEALER and use ROUTER <-> ROUTER communication.
 
 Tasklist
 ========
 
-Next:
+  * Configurable parameters (polling periods etc).
   * Discovery.
   * Application-level load balancing.
   * Message limits.
@@ -44,7 +44,6 @@ Next:
     on its ping/average response speed/etc.
   * Smart heartbeating? (different peers -- different frequency
     that we should agree on beforehand.
-  * Smart broadcasting (client -> [set of peers] instead of PUB).
 -}
 
 module Loot.Network.ZMQ
