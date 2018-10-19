@@ -23,7 +23,6 @@ import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
-import Data.ByteString (ByteString)
 import Data.Default (def)
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.HashSet as HSet
@@ -69,15 +68,6 @@ data PeersInfoVar = PeersInfoVar
     }
 
 makeLenses ''PeersInfoVar
-
--- | Returns the hashset of peers we send data to.
-peersToSend :: PeersInfoVar -> STM (HashSet ZTInternalId)
-peersToSend piv = do
-    plist <- HMap.elems <$> readTVar (piv ^. pivConnected)
-    let p = HSet.fromList plist
-    when (HSet.size p /= length plist) $
-        error $ "peersToSend: values collision: " <> show plist
-    pure p
 
 -- TODO it's defined here b/c for performance reasons it'd be better
 -- to have it in peersInfoVar too and not build from scratch every
@@ -252,7 +242,7 @@ data ZTNetCliEnv = ZTNetCliEnv
 
 -- | Creates client environment.
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> [ZTNodeId] -> m ZTNetCliEnv
-createNetCliEnv ztGlobalEnv@ZTGlobalEnv{..} peers = liftIO $ do
+createNetCliEnv globalEnv@ZTGlobalEnv{..} peers = liftIO $ do
     ztCliBack <- Z.socket ztContext Z.Router
     ztCliBackAdapter <- newSocketAdapter ztCliBack
     Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
@@ -274,7 +264,7 @@ createNetCliEnv ztGlobalEnv@ZTGlobalEnv{..} peers = liftIO $ do
     let ztCliLogging = ztLogging & logNameSelL %~ modGivenName
     let ztCliEnv = ZTNetCliEnv {..}
 
-    changePeers ztGlobalEnv ztCliEnv $ def & uprAdd .~ peers
+    changePeers globalEnv ztCliEnv $ def & uprAdd .~ peers
 
     pure ztCliEnv
 

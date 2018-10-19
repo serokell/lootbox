@@ -16,6 +16,7 @@ module Loot.Network.ZMQ.Common
     , ztNodeIdRouter
     , ztNodeIdPub
     , ZTInternalId (..)
+    , randomZTInternalId
 
       -- | Global environment
     , ZTGlobalEnv(..)
@@ -27,8 +28,10 @@ module Loot.Network.ZMQ.Common
 import Prelude hiding (log)
 
 import Codec.Serialise (Serialise)
+import qualified Data.ByteString as BS
 import qualified Data.List as L
 import GHC.Stack (HasCallStack, callStack)
+import System.Random (randomIO, randomRIO)
 import qualified System.ZMQ4 as Z
 
 import Loot.Log.Internal (Level, Logging (..), selectLogName)
@@ -99,6 +102,15 @@ newtype ZTInternalId = ZTInternalId
     } deriving (Eq, Ord, Show, Generic)
 
 instance Hashable ZTInternalId
+
+-- | Generates a random zeromq identity. It's the same as in ZMQ by
+-- default -- 5 bytes long, first bit is not zero.
+randomZTInternalId :: IO ZTInternalId
+randomZTInternalId = do
+    -- First bit may not be 0 according to ZMQ
+    h <- randomRIO (32,63)
+    t <- replicateM 4 randomIO
+    pure $ ZTInternalId $ BS.pack $ h:t
 
 ----------------------------------------------------------------------------
 -- Zeromq global environment
