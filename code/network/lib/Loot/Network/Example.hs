@@ -69,13 +69,13 @@ log :: MonadIO m => Text -> m ()
 log x = do
     liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
 
-withZMQ :: Name -> ZTNodeId -> Set ZTNodeId -> Env () -> Env () -> IO ()
+withZMQ :: Name -> ZTNodeId -> [ZTNodeId] -> Env () -> Env () -> IO ()
 withZMQ name nId peers server action = do
     let logFoo l n t = log $ "[" <> show l <> "] " <> show n <> ": " <> t
     let logging = Logging logFoo (pure $ GivenName name)
     withZTGlobalEnv logging $ \ztEnv -> do
         cliEnv <- createNetCliEnv ztEnv peers
-        servEnv <- createNetServEnv ztEnv nId Nothing
+        servEnv <- createNetServEnv ztEnv nId
         let execute = flip runReaderT (BigState cliEnv servEnv ztEnv) $
                       void $ A.withAsync server $ const $
                       void $ A.withAsync runClient $ const $
@@ -84,8 +84,8 @@ withZMQ name nId peers server action = do
 
 testZmq :: IO ()
 testZmq = do
-    n1 <- mkZTNodeId (PreZTNodeId "localhost" 8001 8002)
-    n2 <- mkZTNodeId (PreZTNodeId "localhost" 8003 8004)
+    let n1 = ZTNodeId "localhost" 8001 8002
+    let n2 = ZTNodeId "localhost" 8003 8004
     print n1
     print n2
     let node1 = do
@@ -129,7 +129,7 @@ testZmq = do
                     x <- atomically $ recvBtq biQ
                     log $ "subreader: got " <> show x
 
-            withZMQ "n2" n2 (Set.singleton n1) runServer $ do
+            withZMQ "n2" n2 [n1] runServer $ do
                 log "client: *starting*"
                 -- biq2 is also subscribed to blocks but will discard them, just to test
                 -- that subs are propagated properly
@@ -139,7 +139,7 @@ testZmq = do
                             "subreader"
                             mempty
                             (Set.singleton (Subscription "block"))
-                updatePeers @ZmqTcp $ def & uprAdd .~ (Set.singleton n1)
+                updatePeers @ZmqTcp $ def & uprAdd .~ [n1]
                 void $ A.concurrently_ (runPinger biQ1) (runSubreader biQ2)
     void $ A.withAsync node1 $ const $ do
         threadDelay 1000000

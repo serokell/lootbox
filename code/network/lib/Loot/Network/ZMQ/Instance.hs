@@ -21,7 +21,7 @@ module Loot.Network.ZMQ.Instance
 import Loot.Base.HasLens (HasLens (..), HasLens')
 import qualified Loot.Network.Class as C
 import qualified Loot.Network.ZMQ.Client as ZC
-import Loot.Network.ZMQ.Common (ZTNodeId)
+import Loot.Network.ZMQ.Common (ZTGlobalEnv, ZTNodeId)
 import qualified Loot.Network.ZMQ.Server as ZS
 
 type ReaderIOM r m = (MonadReader r m, MonadIO m)
@@ -30,7 +30,7 @@ type ReaderIOM r m = (MonadReader r m, MonadIO m)
 -- Client
 ----------------------------------------------------------------------------
 
-runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, MonadMask m) => m ()
+runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, HasLens' r ZTGlobalEnv, MonadMask m) => m ()
 runClientDefault = ZC.runBroker
 
 getPeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
