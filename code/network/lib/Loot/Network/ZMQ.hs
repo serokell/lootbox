@@ -7,12 +7,15 @@ Implementation
 
 Implementation follows ZMQ Guide (http://zguide.zeromq.org/page:all#toc111)
 and, in particular, some relevant patterns:
-* "Pub/Sub Message Envelopes". Messages are three+ frames, first one is
-  key, second is address, third+ is data.
+* For direct communication: ROUTER to ROUTER. Instead of suggested
+  "nasty freelancer" pattern our nodes exchange do the handshake where
+  server communicates its identity to the client.
+* For subscriptions we use "Pub/Sub Message Envelopes". Messages are
+  three+ frames, first one is key, second is address, third+ is data.
   http://zguide.zeromq.org/page:all#toc49
-* One-way heartbeating using PUB/SUB (because it's a recommended way)
-* Instead of suggested "nasty freelancer" pattern our nodes exchange do
-  the handshake where server communicates its identity to the client.
+* One-way (server to client) heartbeating using PUB/SUB, see the
+  "heartbeating for paranoid pirate":
+  http://zguide.zeromq.org/page:all#Heartbeating-for-Paranoid-Pirate
 
 Server:
 * Binds to two ports: ROUTER and PUSH
