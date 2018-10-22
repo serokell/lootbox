@@ -37,6 +37,7 @@ module Loot.Log.Internal
 import Prelude hiding (log, toList)
 
 import Data.DList (DList)
+import Data.Yaml (FromJSON (..), ToJSON (..), withText, Value(String))
 import Fmt (Buildable (build), fmt, (+|), (|+))
 import Fmt.Internal (FromBuilder (fromBuilder))
 import GHC.Exts (IsList (Item, fromList, toList), IsString (fromString))
@@ -69,6 +70,23 @@ data Level
     | Error     -- ^ Errors.
     deriving (Eq, Ord, Generic, Show)
 
+instance FromJSON Level where
+    parseJSON = withText "Level" $ \case
+        "Debug"   -> pure Debug
+        "Info"    -> pure Info
+        "Notice"  -> pure Notice
+        "Warning" -> pure Warning
+        "Error"   -> pure Error
+        _ -> fail "Parsing Level value failed: expected \"Debug\", \"Info\",\
+                  \ \"Notice\", \"Warning\" or \"Error\""
+
+instance ToJSON Level where
+    toJSON = \case
+        Debug   -> String "Debug"
+        Info    -> String "Info"
+        Notice  -> String "Notice"
+        Warning -> String "Warning"
+        Error   -> String "Error"
 
 -- | Logger name (namespace).
 newtype Name = Name { unName :: DList Text }
