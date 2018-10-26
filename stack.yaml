@@ -1,5 +1,9 @@
 resolver: snapshot.yaml
 
+extra-deps:
+- git: https://github.com/pasqu4le/hslogger.git
+  commit: 28d5f0cf220a1b7162eaa1535e72e6cad2362ee4
+
 packages:
   - code/base
   - code/config
