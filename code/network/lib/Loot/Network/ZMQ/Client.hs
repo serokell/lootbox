@@ -30,7 +30,6 @@ import qualified Data.List as L
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Random (randomIO)
 import qualified Text.Show as T
 
@@ -39,10 +38,9 @@ import qualified System.ZMQ4 as Z
 import Loot.Base.HasLens (HasLens (..), HasLens')
 import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), logNameSelL)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
-import Loot.Network.Utils (whileM)
+import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common
-
 
 ----------------------------------------------------------------------------
 -- Manipulating peers
@@ -59,7 +57,7 @@ import Loot.Network.ZMQ.Common
 data PeersInfoVar = PeersInfoVar
     { _pivConnected  :: TVar (HashMap ZTNodeId ZTInternalId)
     -- ^ Peers we're connected to.
-    , _pivConnecting :: TVar (HashMap ZTNodeId (Integer, Z.Socket Z.Dealer, SocketAdapter))
+    , _pivConnecting :: TVar (HashMap ZTNodeId (TimeDurationMs, Z.Socket Z.Dealer, SocketAdapter))
     -- ^ Argument is POSIX milliseconds representation of connection
     -- attempt time.
     }
@@ -84,32 +82,33 @@ peersRevMap piv = do
 ----------------------------------------------------------------------------
 
 -- these should be configurable
-hbLivenessMax, hbIntervalMin, hbIntervalMax :: Integer
+hbLivenessMax :: Integer
 hbLivenessMax = 5
-hbIntervalMin = 2000
-hbIntervalMax = 32000
+
+hbIntervalMin, hbIntervalMax :: TimeDurationMs
+hbIntervalMin = TimeDurationMs 2000
+hbIntervalMax = TimeDurationMs 32000
 
 -- Integer arithmetic is used here instead of UTCTime manipulation
 -- because it is all scoped (not an external API) and also (possibly)
 -- faster.
 
-data HBState = HBState
-    { _hbInterval :: Integer -- ^ Milliseconds.
-    , _hbLiveness :: Integer -- ^ Attempts before we reset the connection.
-    , _hbNextPoll :: Integer -- ^ POSIX milliseconds, when to decrease liveliness.
-    , _hbInactive :: Bool    -- ^ This flag makes node invisible to
-                             -- heartbeat worker, which is needed to
-                             -- deal with the fact that reconnects and
-                             -- disconnects take time.
+data HeartbeatState = HeartbeatState
+    { _hbInterval :: TimeDurationMs
+       -- ^ Heartbeating interval.
+    , _hbLiveness :: Integer
+       -- ^ Attempts before we reset the connection.
+    , _hbNextPoll :: TimeDurationMs
+       -- ^ Timestamp: when to decrease liveliness.
+    , _hbInactive :: Bool
+       -- ^ This flag makes node invisible to heartbeat worker, which
+       -- is needed to deal with the fact that reconnects and
+       -- disconnects take time.
     }
 
-makeLenses ''HBState
+makeLenses ''HeartbeatState
 
--- Gets current time in POSIX ms.
-getCurrentTimeMS :: IO Integer
-getCurrentTimeMS = floor . (*1000) <$> getPOSIXTime
-
-updateHeartbeat :: TVar (Map ZTNodeId HBState) -> ZTNodeId -> IO ()
+updateHeartbeat :: TVar (Map ZTNodeId HeartbeatState) -> ZTNodeId -> IO ()
 updateHeartbeat states nodeId = do
     let modAction Nothing    = error "updateHeartbeat: uninitalised"
         modAction (Just hbs) = Just $ hbs & hbLiveness .~ hbLivenessMax
@@ -119,14 +118,19 @@ updateHeartbeat states nodeId = do
 -- Heartbeating worker. It regularly checks whether we had proper ping
 -- messages from others, otherwise asks broker to reconnect these
 -- peers.
-heartbeatWorker :: TVar (Map ZTNodeId HBState) -> CliRequestQueue -> IO ()
+heartbeatWorker :: TVar (Map ZTNodeId HeartbeatState) -> CliRequestQueue -> IO ()
 heartbeatWorker heartbeatInfo requestQueue = forever $ do
     threadDelay 50000
-    curTime <- getCurrentTimeMS
-    let modMap :: Map ZTNodeId HBState -> (Set ZTNodeId, Map ZTNodeId HBState)
-        modMap hbMap =
-            let foo :: (ZTNodeId, HBState) -> (Bool, (ZTNodeId, HBState))
-                foo x@(nodeId, hbs)
+    curTime <- getCurrentTimeMs
+    let decideReconnect :: Map ZTNodeId HeartbeatState
+                        -> (Set ZTNodeId, Map ZTNodeId HeartbeatState)
+        decideReconnect hbMap =
+            -- For every nodeid with heartbeating state checks whether
+            -- heartbeating timeouted for the nodeid, and changes the
+            -- state accordingly.
+            let checkPollTime :: (ZTNodeId, HeartbeatState)
+                              -> (Bool, (ZTNodeId, HeartbeatState))
+                checkPollTime x@(nodeId, hbs)
                     | not (hbs ^. hbInactive) && hbs ^. hbNextPoll < curTime =
                           if hbs ^. hbLiveness == 1
                           then (True, (nodeId, hbs & hbInactive .~ True))
@@ -134,12 +138,12 @@ heartbeatWorker heartbeatInfo requestQueue = forever $ do
                                                     & hbNextPoll .~
                                                       (curTime + hbs ^. hbInterval)))
                     | otherwise = (False, x)
-                mapped = map foo (Map.toList hbMap)
+                mapped = map checkPollTime (Map.toList hbMap)
                 toReconnect = map (fst . snd) $ filter fst mapped
             in (Set.fromList toReconnect, Map.fromList $ map snd mapped)
     atomically $ do
         hbMap <- readTVar heartbeatInfo
-        let (toReconnect,hbMap') = modMap hbMap
+        let (toReconnect,hbMap') = decideReconnect hbMap
         writeTVar heartbeatInfo hbMap'
         unless (Set.null toReconnect) $
             TQ.writeTQueue (unCliRequestQueue requestQueue) (IRReconnect toReconnect)
@@ -162,7 +166,7 @@ instance T.Show InternalRequest where
 
 -- Get hashmap keys as a hashset.
 hmKeys :: HashMap k a -> HashSet k
-hmKeys = HSet.fromMap . fmap (const ())
+hmKeys = HSet.fromMap . HMap.map (const ())
 
 -- Reformulates peers update request in terms of current peer info
 -- var, returning the set of add/del nodes. Doesn't change PIV itself.
@@ -221,7 +225,7 @@ data ZTNetCliEnv = ZTNetCliEnv
 
     , ztPeers           :: !PeersInfoVar
       -- ^ Information about peers.
-    , ztHeartbeatInfo   :: !(TVar (Map ZTNodeId HBState))
+    , ztHeartbeatInfo   :: !(TVar (Map ZTNodeId HeartbeatState))
       -- ^ Information about connection and current heartbeating
       -- state.
 
@@ -254,7 +258,7 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} peers = liftIO $ do
     ztClients <- newTVarIO mempty
     ztPeers <- PeersInfoVar <$> newTVarIO HMap.empty
                             <*> newTVarIO HMap.empty
-    ztHeartbeatInfo <- newTVarIO mempty -- initialise it later
+    ztHeartbeatInfo <- newTVarIO mempty
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
@@ -275,14 +279,17 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
     Z.close ztCliBack
     adapterRelease ztCliSubAdapter
     Z.close ztCliSub
-    peersRes <- atomically $ HMap.elems <$> readTVar (ztPeers ^. pivConnecting)
-    forM_ peersRes $ \(_,sock,adapter) ->
+    -- Free the dealer sockets/adapters for peers we're currently
+    -- connecting to.
+    peersResources <-
+        atomically $ HMap.elems <$> readTVar (ztPeers ^. pivConnecting)
+    forM_ peersResources $ \(_,sock,adapter) ->
         Z.close sock >> adapterRelease adapter
 
 -- Connects/disconnects peers at request.
 changePeers :: MonadIO m => ZTGlobalEnv -> ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
 changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
-    curTime <- getCurrentTimeMS
+    curTime <- getCurrentTimeMs
 
     -- We pre-create sockets to use them in the STM. The number may be
     -- slightly more than the real number used (due to the possibly
@@ -297,7 +304,7 @@ changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
         -- Modify actual variables content.
         modifyTVar (ztPeers ^. pivConnected) $! \p ->
             p `HMap.difference` HMap.fromList (map (,()) toDel)
-        let addInfo = map (\(s,a) -> (curTime,s,a)) $ sockets `zip` adapters
+        let addInfo = zipWith (\s a -> (curTime,s,a)) sockets adapters
         modifyTVar (ztPeers ^. pivConnecting) $! \p ->
             p `HMap.union` HMap.fromList (toAdd `zip` addInfo)
 
@@ -330,10 +337,9 @@ changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
 -- "connected" state).
 contConnectionReq :: ZTGlobalEnv -> ZTNetCliEnv -> ZTNodeId -> ZTInternalId -> IO ()
 contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
-    curTime <- getCurrentTimeMS
+    curTime <- getCurrentTimeMs
     resourcesM <- atomically $ do
-        connected <- HMap.toList <$> readTVar (ztPeers ^. pivConnected)
-        let clash = isJust $ find (\(_,iId') -> iId' == iId) connected
+        clash <- HMap.member iId <$> peersRevMap ztPeers
         if clash
         then pure Nothing
         else do
@@ -346,7 +352,7 @@ contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
 
             -- 2 seconds heuristical delay before heartbeating worker
             -- starts noticing these nodes.
-            let initHbs = HBState hbIntervalMin hbLivenessMax (curTime + 2000) False
+            let initHbs = HeartbeatState hbIntervalMin hbLivenessMax (curTime + 2000) False
             modifyTVar ztHeartbeatInfo $ at nodeId .~ Just initHbs
 
             pure $ Just (sock,adapter)
@@ -376,7 +382,7 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
         Z.connect ztCliBack (ztNodeIdRouter nId)
         Z.disconnect ztCliSub (ztNodeIdPub nId)
         Z.connect ztCliSub (ztNodeIdPub nId)
-    curTime <- getCurrentTimeMS
+    curTime <- getCurrentTimeMs
     atomically $ do
         let mulTwoMaybe x | x >= hbIntervalMax = x
                           | otherwise = 2 * x
@@ -398,7 +404,7 @@ connectionsWorker logging piv =
     connectionTimeoutMS = 10000 -- 10 sec
     action = forever $ do
         threadDelay 500000 -- 0.5 sec
-        curTime <- getCurrentTimeMS
+        curTime <- getCurrentTimeMs
         let predicate (_,(created,_,_)) = created + connectionTimeoutMS > curTime
         (disconnected,notconnected) <- atomically $ do
             prev <- readTVar (piv ^. pivConnecting)
