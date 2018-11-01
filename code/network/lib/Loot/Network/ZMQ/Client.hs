@@ -56,8 +56,7 @@ data ZTCliSettings = ZTCliSettings
       -- in ms.
     , zsHBIntervalMax     :: !TimeDurationMs
       -- ^ Heartbeating maximum interval (the one we end up with --
-      -- after exponential backoff, should be a multiple of min). We
-      -- do not double the length after this one.
+      -- after exponential backoff).
     , zsConnectingTimeout :: !TimeDurationMs
       -- ^ Connecting timeout in ms. We'll stop trying to connect to
       -- the node after this amount of time. -1 means "no timeout".
@@ -421,8 +420,12 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
         Z.connect ztCliSub (ztNodeIdPub nId)
     curTime <- getCurrentTimeMs
     atomically $ do
-        let mulTwoMaybe x | x >= zsHBIntervalMax ztCliSettings = x
-                          | otherwise = 2 * x
+        -- Multiply by two if we don't exceed the max limit, otherwise
+        -- set to the max limit.
+        let mulTwoMaybe x
+                | 2 * x > zsHBIntervalMax ztCliSettings =
+                  zsHBIntervalMax ztCliSettings
+                | otherwise = 2 * x
         let upd Nothing = error "reconnectPeers: can't upd, got nothing"
             upd (Just hbs) =
                 let newInterval = mulTwoMaybe (hbs ^. hbInterval)
