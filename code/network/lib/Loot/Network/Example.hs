@@ -79,8 +79,8 @@ withZMQ name nId peers server action = do
     let logFoo l n t = log $ "[" <> show l <> "] " <> show n <> ": " <> t
     let logging = Logging logFoo (pure $ GivenName name)
     withZTGlobalEnv logging $ \ztEnv -> do
-        cliEnv <- createNetCliEnv ztEnv peers
-        servEnv <- createNetServEnv ztEnv nId
+        cliEnv <- createNetCliEnv ztEnv def peers
+        servEnv <- createNetServEnv ztEnv def nId
         let execute = flip runReaderT (BigState cliEnv servEnv ztEnv) $
                       void $ A.withAsync server $ const $
                       void $ A.withAsync runClient $ const $

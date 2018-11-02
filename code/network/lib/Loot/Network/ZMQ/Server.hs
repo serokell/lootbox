@@ -5,7 +5,8 @@
 -- | Server-side logic.
 
 module Loot.Network.ZMQ.Server
-       ( ZTNetServEnv (..)
+       ( ZTServSettings (..)
+       , ZTNetServEnv
        , createNetServEnv
 
        , ZTListenerEnv
@@ -23,6 +24,7 @@ import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
+import Data.Default (Default (def))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Text.Show as T
@@ -38,6 +40,19 @@ import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common
 
+
+----------------------------------------------------------------------------
+-- Server side settings
+----------------------------------------------------------------------------
+
+-- | Server configuration options.
+data ZTServSettings = ZTServSettings
+    { zsHeartbeatsInterval  :: !Integer
+      -- ^ How much time to wait between sending heartbeats, in ms.
+    }
+
+instance Default ZTServSettings where
+    def = ZTServSettings {zsHeartbeatsInterval = 300}
 
 ----------------------------------------------------------------------------
 -- Internal communication
@@ -64,7 +79,7 @@ type ZTServSendMsg = ServSendMsg ZTCliId
 
 type ZTListenerEnv = BiTQueue (ZTCliId, MsgType, Content) ZTServSendMsg
 
--- | A context for the broker, essentially.
+-- | A context for the broker, mustn't be modified manually.
 data ZTNetServEnv = ZTNetServEnv
     { ztOurNodeId        :: !ZTInternalId
       -- ^ Our identifier, in case we need it to send someone
@@ -90,12 +105,15 @@ data ZTNetServEnv = ZTNetServEnv
 
     , ztServLogging      :: !(Logging IO)
       -- ^ Logging function from global context.
+
+    , ztServSettings     :: !ZTServSettings
+      -- ^ Server settings.
     }
 
 -- | Creates server environment. Accepts only the host/ports to bind
 -- on, with the exceptin that "localhost" is turned into "127.0.0.1".
-createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> m ZTNetServEnv
-createNetServEnv ZTGlobalEnv{..} ztBindOn0 = liftIO $ do
+createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTServSettings -> ZTNodeId -> m ZTNetServEnv
+createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
     ztOurNodeId <- randomZTInternalId
 
     ztServFront <- Z.socket ztContext Z.Router
@@ -187,9 +205,10 @@ runBroker = do
             _ -> ztLog ztServLogging Warning "frontToListener: wrong format"
 
     let hbWorker = forever $ do
-            let heartbeatInterval = 300000 -- 300 ms
-            threadDelay heartbeatInterval
-            atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
+            threadDelay $
+                (fromIntegral $ zsHeartbeatsInterval ztServSettings) * 1000
+            atomically $
+                TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
     liftIO $ A.withAsync hbWorker $ const $ do
       let action = liftIO $ do
@@ -222,9 +241,10 @@ runBroker = do
                     threadDelay 2000000)
 
 registerListener ::
-       (MonadReader r m, MonadIO m)
-    => ServRequestQueue -> ListenerId -> Set MsgType -> m ZTListenerEnv
-registerListener queue lName msgTypes = do
+       (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m)
+    => ListenerId -> Set MsgType -> m ZTListenerEnv
+registerListener lName msgTypes = do
+    queue <- ztServRequestQueue <$> view (lensOf @ZTNetServEnv)
     let servRequestQueue = unServRequestQueue queue
     liftIO $ do
         biTQueue <- newBtq

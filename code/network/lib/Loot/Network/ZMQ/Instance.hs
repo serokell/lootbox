@@ -63,6 +63,4 @@ registerListenerDefault ::
     => C.ListenerId
     -> Set C.MsgType
     -> m ZS.ZTListenerEnv
-registerListenerDefault l m = do
-    q <- ZS.ztServRequestQueue <$> view (lensOf @ZS.ZTNetServEnv)
-    ZS.registerListener q l m
+registerListenerDefault = ZS.registerListener

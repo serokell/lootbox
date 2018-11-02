@@ -4,7 +4,8 @@
 -- | ZMQ Client implementation.
 
 module Loot.Network.ZMQ.Client
-    ( ZTNetCliEnv (..)
+    ( ZTCliSettings (..)
+    , ZTNetCliEnv (..)
     , createNetCliEnv
     , termNetCliEnv
     , ZTClientEnv
@@ -23,7 +24,7 @@ import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
-import Data.Default (def)
+import Data.Default (Default (def))
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.HashSet as HSet
 import qualified Data.List as L
@@ -41,6 +42,34 @@ import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
 import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common
+
+----------------------------------------------------------------------------
+-- Settings
+----------------------------------------------------------------------------
+
+-- | Client configuration options.
+data ZTCliSettings = ZTCliSettings
+    { zsHBLivenessMax     :: !Integer
+      -- ^ Heartbeating maximum liveliness.
+    , zsHBIntervalMin     :: !TimeDurationMs
+      -- ^ Heartbeating minimum time interval (the one we start from),
+      -- in ms.
+    , zsHBIntervalMax     :: !TimeDurationMs
+      -- ^ Heartbeating maximum interval (the one we end up with --
+      -- after exponential backoff).
+    , zsConnectingTimeout :: !TimeDurationMs
+      -- ^ Connecting timeout in ms. We'll stop trying to connect to
+      -- the node after this amount of time. -1 means "no timeout".
+    }
+
+instance Default ZTCliSettings where
+    def =
+        ZTCliSettings
+            { zsHBLivenessMax = 5
+            , zsHBIntervalMin = 2000
+            , zsHBIntervalMax = 32000
+            , zsConnectingTimeout = -1
+            }
 
 ----------------------------------------------------------------------------
 -- Manipulating peers
@@ -81,14 +110,6 @@ peersRevMap piv = do
 -- Heartbeats
 ----------------------------------------------------------------------------
 
--- these should be configurable
-hbLivenessMax :: Integer
-hbLivenessMax = 5
-
-hbIntervalMin, hbIntervalMax :: TimeDurationMs
-hbIntervalMin = TimeDurationMs 2000
-hbIntervalMax = TimeDurationMs 32000
-
 -- Integer arithmetic is used here instead of UTCTime manipulation
 -- because it is all scoped (not an external API) and also (possibly)
 -- faster.
@@ -108,42 +129,50 @@ data HeartbeatState = HeartbeatState
 
 makeLenses ''HeartbeatState
 
-updateHeartbeat :: TVar (Map ZTNodeId HeartbeatState) -> ZTNodeId -> IO ()
-updateHeartbeat states nodeId = do
+updateHeartbeat ::
+       ZTCliSettings -> TVar (Map ZTNodeId HeartbeatState) -> ZTNodeId -> IO ()
+updateHeartbeat ZTCliSettings{..} states nodeId = do
     let modAction Nothing    = error "updateHeartbeat: uninitalised"
-        modAction (Just hbs) = Just $ hbs & hbLiveness .~ hbLivenessMax
-                                          & hbInterval .~ hbIntervalMin
+        modAction (Just hbs) = Just $ hbs & hbLiveness .~ zsHBLivenessMax
+                                          & hbInterval .~ zsHBIntervalMin
     atomically $ modifyTVar states $ at nodeId %~ modAction
 
 -- Heartbeating worker. It regularly checks whether we had proper ping
 -- messages from others, otherwise asks broker to reconnect these
--- peers.
-heartbeatWorker :: TVar (Map ZTNodeId HeartbeatState) -> CliRequestQueue -> IO ()
-heartbeatWorker heartbeatInfo requestQueue = forever $ do
+-- peers. It decreases liveness every interval. When it becomes zero,
+-- it asks broker to reconnect the node, the broker will then double
+-- the interval.
+heartbeatWorker ::
+       ZTCliSettings -> TVar (Map ZTNodeId HeartbeatState) -> CliRequestQueue -> IO ()
+heartbeatWorker ZTCliSettings{..} heartbeatInfo requestQueue = forever $ do
     threadDelay 50000
     curTime <- getCurrentTimeMs
-    let decideReconnect :: Map ZTNodeId HeartbeatState
-                        -> (Set ZTNodeId, Map ZTNodeId HeartbeatState)
-        decideReconnect hbMap =
-            -- For every nodeid with heartbeating state checks whether
-            -- heartbeating timeouted for the nodeid, and changes the
-            -- state accordingly.
+    let modMap :: [(ZTNodeId, HeartbeatState)]
+               -> (Set ZTNodeId, Map ZTNodeId HeartbeatState)
+        modMap hbMap =
+            -- Takes nodeId and its hbstate. First element of the
+            -- result is whether we should reconnect the node (which
+            -- happens if liveness is going to become 0).
             let checkPollTime :: (ZTNodeId, HeartbeatState)
                               -> (Bool, (ZTNodeId, HeartbeatState))
                 checkPollTime x@(nodeId, hbs)
-                    | not (hbs ^. hbInactive) && hbs ^. hbNextPoll < curTime =
+                    -- We ignore inactive nodes and active nodes for
+                    -- which poll time is not timeouted.
+                    | hbs ^. hbInactive ||
+                      hbs ^. hbNextPoll > curTime = (False, x)
+                    | otherwise =
                           if hbs ^. hbLiveness == 1
                           then (True, (nodeId, hbs & hbInactive .~ True))
                           else (False, (nodeId, hbs & hbLiveness -~ 1
                                                     & hbNextPoll .~
                                                       (curTime + hbs ^. hbInterval)))
-                    | otherwise = (False, x)
-                mapped = map checkPollTime (Map.toList hbMap)
-                toReconnect = map (fst . snd) $ filter fst mapped
-            in (Set.fromList toReconnect, Map.fromList $ map snd mapped)
+                (toReconnect,toLeave) =
+                    bimap (map snd) (map snd) $
+                    L.partition fst $ map checkPollTime hbMap
+            in (Set.fromList (map fst toReconnect), Map.fromList toLeave)
     atomically $ do
         hbMap <- readTVar heartbeatInfo
-        let (toReconnect,hbMap') = decideReconnect hbMap
+        let (toReconnect,hbMap') = modMap (Map.toList hbMap)
         writeTVar heartbeatInfo hbMap'
         unless (Set.null toReconnect) $
             TQ.writeTQueue (unCliRequestQueue requestQueue) (IRReconnect toReconnect)
@@ -242,11 +271,14 @@ data ZTNetCliEnv = ZTNetCliEnv
 
     , ztCliLogging      :: !(Logging IO)
       -- ^ Logging function from global context.
+
+    , ztCliSettings     :: !ZTCliSettings
+      -- ^ Client settings.
     }
 
 -- | Creates client environment.
-createNetCliEnv :: MonadIO m => ZTGlobalEnv -> [ZTNodeId] -> m ZTNetCliEnv
-createNetCliEnv globalEnv@ZTGlobalEnv{..} peers = liftIO $ do
+createNetCliEnv :: MonadIO m => ZTGlobalEnv -> ZTCliSettings -> [ZTNodeId] -> m ZTNetCliEnv
+createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
     ztCliBack <- Z.socket ztContext Z.Router
     ztCliBackAdapter <- newSocketAdapter ztCliBack
     Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
@@ -335,7 +367,8 @@ changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
 
 -- Continues connection request (moves peer from "connecting" to
 -- "connected" state).
-contConnectionReq :: ZTGlobalEnv -> ZTNetCliEnv -> ZTNodeId -> ZTInternalId -> IO ()
+contConnectionReq ::
+       ZTGlobalEnv -> ZTNetCliEnv -> ZTNodeId -> ZTInternalId -> IO ()
 contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
     curTime <- getCurrentTimeMs
     resourcesM <- atomically $ do
@@ -350,9 +383,11 @@ contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
             modifyTVar (ztPeers ^. pivConnected) $ HMap.insert nodeId iId
             modifyTVar (ztPeers ^. pivConnecting) $ HMap.delete nodeId
 
-            -- 2 seconds heuristical delay before heartbeating worker
-            -- starts noticing these nodes.
-            let initHbs = HeartbeatState hbIntervalMin hbLivenessMax (curTime + 2000) False
+            let initHbs = HeartbeatState
+                    (zsHBIntervalMin ztCliSettings)
+                    (zsHBLivenessMax ztCliSettings)
+                    curTime
+                    False
             modifyTVar ztHeartbeatInfo $ at nodeId .~ Just initHbs
 
             pure $ Just (sock,adapter)
@@ -377,6 +412,7 @@ reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
     ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
 
+
     forM_ nIds $ \nId -> do
         Z.disconnect ztCliBack (ztNodeIdRouter nId)
         Z.connect ztCliBack (ztNodeIdRouter nId)
@@ -384,8 +420,12 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
         Z.connect ztCliSub (ztNodeIdPub nId)
     curTime <- getCurrentTimeMs
     atomically $ do
-        let mulTwoMaybe x | x >= hbIntervalMax = x
-                          | otherwise = 2 * x
+        -- Multiply by two if we don't exceed the max limit, otherwise
+        -- set to the max limit.
+        let mulTwoMaybe x
+                | 2 * x > zsHBIntervalMax ztCliSettings =
+                  zsHBIntervalMax ztCliSettings
+                | otherwise = 2 * x
         let upd Nothing = error "reconnectPeers: can't upd, got nothing"
             upd (Just hbs) =
                 let newInterval = mulTwoMaybe (hbs ^. hbInterval)
@@ -396,20 +436,21 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
             foldl' (\m nId -> m & at nId %~ upd) hbInfo nIds
 
 -- This worker cleans up connection attempts that were stuck.
-connectionsWorker :: Logging IO -> PeersInfoVar -> IO ()
-connectionsWorker logging piv =
+connectionsWorker :: ZTNetCliEnv -> IO ()
+connectionsWorker ZTNetCliEnv{..} =
     forever $ action `catchAny` handler
   where
-    -- TODO this should be configurable.
-    connectionTimeoutMS = 10000 -- 10 sec
     action = forever $ do
         threadDelay 500000 -- 0.5 sec
         curTime <- getCurrentTimeMs
-        let predicate (_,(created,_,_)) = created + connectionTimeoutMS > curTime
+        let timeout = zsConnectingTimeout ztCliSettings
+        let leaveNode (_,(created,_,_))
+                | timeout == -1 = True
+                | otherwise = created + timeout > curTime
         (disconnected,notconnected) <- atomically $ do
-            prev <- readTVar (piv ^. pivConnecting)
-            let (stay,leave) = L.partition predicate (HMap.toList prev)
-            writeTVar (piv ^. pivConnecting) (HMap.fromList stay)
+            prev <- readTVar (ztPeers ^. pivConnecting)
+            let (stay,leave) = L.partition leaveNode (HMap.toList prev)
+            writeTVar (ztPeers ^. pivConnecting) (HMap.fromList stay)
             pure (leave,map (view $ _2 . _2) stay)
         -- Sending messages until connected/disconnected. This
         -- prevents the situation when the server starts later then
@@ -418,13 +459,13 @@ connectionsWorker logging piv =
         forM_ notconnected $ \dSock ->
             Z.sendMulti dSock $ NE.fromList ["","getid"]
         unless (null disconnected) $ do
-            ztLog logging Warning $
+            ztLog ztCliLogging Warning $
                 "Connecting attempt timeouted for peers: " <>
                 show (map fst disconnected)
             forM_ disconnected $ \(_,(_,sock,adapter)) ->
                 Z.close sock >> adapterRelease adapter
     handler e = do
-        ztLog logging Error $
+        ztLog ztCliLogging Error $
             "Connections timeout worker failed: " <> show e <>
             ", restarting in 2s"
         threadDelay 2000000
@@ -482,7 +523,7 @@ runBroker = do
                 pure $ isJust toWrite
             unless res $ ztCliLog Warning $ "sendToClient: cId doesn't exist: " <> show clientId
 
-    let onHeartbeat addr = liftIO $ updateHeartbeat ztHeartbeatInfo addr
+    let onHeartbeat addr = liftIO $ updateHeartbeat ztCliSettings ztHeartbeatInfo addr
 
     let processReq = \case
             IRUpdatePeers req -> changePeers gEnv cEnv req
@@ -584,8 +625,8 @@ runBroker = do
 
     -- Runner
     let withWorkers action =
-             A.withAsync (heartbeatWorker ztHeartbeatInfo ztCliRequestQueue) $ const $
-             A.withAsync (connectionsWorker ztCliLogging ztPeers) $ const $
+             A.withAsync (heartbeatWorker ztCliSettings ztHeartbeatInfo ztCliRequestQueue) $ const $
+             A.withAsync (connectionsWorker cEnv) $ const $
              action
 
     liftIO $ withWorkers $ do
