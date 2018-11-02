@@ -7,7 +7,6 @@ module Loot.Network.ZMQ.Common
       -- | Misc
       ZmqTcp
     , ztLog
-    , heartbeatSubscription
     , endpointTcp
 
       -- | Node identities
@@ -23,6 +22,11 @@ module Loot.Network.ZMQ.Common
     , ztGlobalEnv
     , ztGlobalEnvRelease
     , withZTGlobalEnv
+
+      -- | Internal messages
+    , heartbeatSubscription
+    , tag_getId
+    , tag_normal
     ) where
 
 import Prelude hiding (log)
@@ -43,10 +47,6 @@ import Loot.Network.Class (Subscription (..))
 
 -- | Networking tag type for ZMQ over TCP.
 data ZmqTcp
-
--- | Key for heartbeat subscription.
-heartbeatSubscription :: Subscription
-heartbeatSubscription = Subscription "_hb"
 
 -- | Logging function for zmq -- doesn't require any monad, uses
 -- 'Logging IO' directly.
@@ -140,3 +140,20 @@ withZTGlobalEnv ::
     -> m a
 withZTGlobalEnv logFunc action =
     bracket (ztGlobalEnv logFunc) ztGlobalEnvRelease action
+
+----------------------------------------------------------------------------
+-- Internal messages and commands
+----------------------------------------------------------------------------
+
+-- | Key for heartbeat subscription.
+heartbeatSubscription :: Subscription
+heartbeatSubscription = Subscription "_hb"
+
+-- | This indicates that the request on ROUTER is just a request for
+-- the node id.
+tag_getId :: ByteString
+tag_getId = "getId"
+
+-- | Any other (normal) request except for getId.
+tag_normal :: ByteString
+tag_normal = "n"

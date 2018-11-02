@@ -357,7 +357,7 @@ changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
         -- message.
         forM_ (toConnect `zip` sockets) $ \(z,d) -> do
             Z.connect d $ ztNodeIdRouter z
-            Z.sendMulti d $ NE.fromList ["","getid"]
+            Z.sendMulti d $ NE.fromList ["",tag_getId]
         ztLog ztCliLogging Debug $
             "changePeers: preconnecting (sending req) to " <> show toConnect
 
@@ -457,7 +457,7 @@ connectionsWorker ZTNetCliEnv{..} =
         -- the client, in which server doesn't receive our first
         -- handshake request.
         forM_ notconnected $ \dSock ->
-            Z.sendMulti dSock $ NE.fromList ["","getid"]
+            Z.sendMulti dSock $ NE.fromList ["",tag_getId]
         unless (null disconnected) $ do
             ztLog ztCliLogging Warning $
                 "Connecting attempt timeouted for peers: " <>

@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms      #-}
 {-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -154,6 +155,7 @@ data ServBrokerStmRes
     | SBRequest InternalRequest
     deriving (Show)
 
+
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
     ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
@@ -189,11 +191,11 @@ runBroker = do
             Publish k v -> publish k v
 
     let frontToListener = \case
-            [cId,"","getid"] -> do
+            [cId,"",t] | t == tag_getId -> do
                 Z.sendMulti ztServFront $
                   NE.fromList [cId,"",unZTInternalId ztOurNodeId]
                 ztLog ztServLogging Debug "Received request connection, replied with our id"
-            (cId:"":"m":msgT:msg) -> do
+            (cId:"":t:msgT:msg) | t == tag_normal -> do
                 ztEnv <- atomically $ runMaybeT $ do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
