@@ -410,16 +410,14 @@ contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
 -- back, doubling their heartbeating interval.
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
 reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
-    ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
-
-
-    forM_ nIds $ \nId -> do
-        Z.disconnect ztCliBack (ztNodeIdRouter nId)
-        Z.connect ztCliBack (ztNodeIdRouter nId)
-        Z.disconnect ztCliSub (ztNodeIdPub nId)
-        Z.connect ztCliSub (ztNodeIdPub nId)
     curTime <- getCurrentTimeMs
-    atomically $ do
+    toReconnect <- atomically $ do
+        -- NodeIds that we really need to reconnect -- after the HB
+        -- requested a reconnect some of the peers could be
+        -- disconnected (for instance, at a user's request).
+        allConnected <- readTVar (ztPeers ^. pivConnected)
+        let toReconnect = Set.filter (`HMap.member` allConnected) nIds
+
         -- Multiply by two if we don't exceed the max limit, otherwise
         -- set to the max limit.
         let mulTwoMaybe x
@@ -432,8 +430,18 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
                 in Just $ hbs & hbInactive .~ False
                               & hbInterval .~ newInterval
                               & hbNextPoll .~ (curTime + newInterval)
+
         modifyTVar ztHeartbeatInfo $ \hbInfo ->
-            foldl' (\m nId -> m & at nId %~ upd) hbInfo nIds
+            foldl' (\m nId -> m & at nId %~ upd) hbInfo toReconnect
+        pure toReconnect
+
+    unless (null toReconnect) $
+        ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
+    forM_ toReconnect $ \nId -> do
+        Z.disconnect ztCliBack (ztNodeIdRouter nId)
+        Z.connect ztCliBack (ztNodeIdRouter nId)
+        Z.disconnect ztCliSub (ztNodeIdPub nId)
+        Z.connect ztCliSub (ztNodeIdPub nId)
 
 -- This worker cleans up connection attempts that were stuck.
 connectionsWorker :: ZTNetCliEnv -> IO ()
