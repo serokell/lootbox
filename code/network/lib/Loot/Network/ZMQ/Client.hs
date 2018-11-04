@@ -455,16 +455,16 @@ connectionsWorker ZTNetCliEnv{..} =
         let leaveNode (_,(created,_,_))
                 | timeout == -1 = True
                 | otherwise = created + timeout > curTime
-        (disconnected,notconnected) <- atomically $ do
+        (disconnected,notConnSockets) <- atomically $ do
             prev <- readTVar (ztPeers ^. pivConnecting)
             let (stay,leave) = L.partition leaveNode (HMap.toList prev)
             writeTVar (ztPeers ^. pivConnecting) (HMap.fromList stay)
-            pure (leave,map (view $ _2 . _2) stay)
+            pure (leave,map (\(_, (_,sock,_)) -> sock) stay)
         -- Sending messages until connected/disconnected. This
         -- prevents the situation when the server starts later then
         -- the client, in which server doesn't receive our first
         -- handshake request.
-        forM_ notconnected $ \dSock ->
+        forM_ notConnSockets $ \dSock ->
             Z.sendMulti dSock $ NE.fromList ["",tag_getId]
         unless (null disconnected) $ do
             ztLog ztCliLogging Warning $
