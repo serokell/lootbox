@@ -9,9 +9,12 @@ module Loot.Network.Utils
     , tMeasure
     , tMeasureIO
     , whileM
+    , TimeDurationMs (..)
+    , getCurrentTimeMs
     ) where
 
 import qualified Data.Time.Clock as Tm
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import Numeric as N
 
 -- | Monadic version of 'find'.
@@ -40,3 +43,10 @@ tMeasure logAction label action = do
 -- | Execute "pred >>= action" while predicate returns true.
 whileM :: (Monad m) => m Bool -> m () -> m ()
 whileM predicate action = whenM predicate (action >> whileM predicate action)
+
+-- Time interval represented in
+newtype TimeDurationMs = TimeDurationMs Integer deriving (Eq,Ord,Num,Show)
+
+-- Gets current time in POSIX ms.
+getCurrentTimeMs :: IO TimeDurationMs
+getCurrentTimeMs = TimeDurationMs . floor . (*1000) <$> getPOSIXTime

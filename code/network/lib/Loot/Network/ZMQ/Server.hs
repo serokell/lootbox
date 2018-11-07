@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms      #-}
 {-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -5,7 +6,8 @@
 -- | Server-side logic.
 
 module Loot.Network.ZMQ.Server
-       ( ZTNetServEnv (..)
+       ( ZTServSettings (..)
+       , ZTNetServEnv
        , createNetServEnv
 
        , ZTListenerEnv
@@ -23,6 +25,7 @@ import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Monad.Except (runExceptT, throwError)
 import Data.ByteString (ByteString)
+import Data.Default (Default (def))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Text.Show as T
@@ -36,9 +39,21 @@ import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Adapter
-import Loot.Network.ZMQ.Common (PreZTNodeId (..), ZTGlobalEnv (..), ZTNodeId (..), endpointTcp,
-                                heartbeatSubscription, ztLog, ztNodeConnectionId)
+import Loot.Network.ZMQ.Common
 
+
+----------------------------------------------------------------------------
+-- Server side settings
+----------------------------------------------------------------------------
+
+-- | Server configuration options.
+data ZTServSettings = ZTServSettings
+    { zsHeartbeatsInterval  :: !Integer
+      -- ^ How much time to wait between sending heartbeats, in ms.
+    }
+
+instance Default ZTServSettings where
+    def = ZTServSettings {zsHeartbeatsInterval = 300}
 
 ----------------------------------------------------------------------------
 -- Internal communication
@@ -65,15 +80,11 @@ type ZTServSendMsg = ServSendMsg ZTCliId
 
 type ZTListenerEnv = BiTQueue (ZTCliId, MsgType, Content) ZTServSendMsg
 
--- | A context for the broker, essentially.
+-- | A context for the broker, mustn't be modified manually.
 data ZTNetServEnv = ZTNetServEnv
-    { ztOurNodeId        :: !ZTNodeId
+    { ztOurNodeId        :: !ZTInternalId
       -- ^ Our identifier, in case we need it to send someone
       -- explicitly (e.g. when PUBlishing).
-    , ztOurPrivNodeId    :: !PreZTNodeId
-      -- ^ This is a "real" host/port we bind to. It's the same
-      -- as 'ztOurNodeId' except for the situation when server
-      -- is launched with explicit distinct private host to bind to.
     , ztServFront        :: !(Z.Socket Z.Router)
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
@@ -95,27 +106,25 @@ data ZTNetServEnv = ZTNetServEnv
 
     , ztServLogging      :: !(Logging IO)
       -- ^ Logging function from global context.
+
+    , ztServSettings     :: !ZTServSettings
+      -- ^ Server settings.
     }
 
--- | Creates server environment. Accepts our public node id and optional "private"
--- node id, which we actually bind to. This allows us to work behind NAT, binding
--- on A but pretending to serve on B.
-createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTNodeId -> Maybe PreZTNodeId -> m ZTNetServEnv
-createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId ztOurPrivNodeIdM = liftIO $ do
-    let toPreNodeIdM (ZTNodeId _ h p1 p2) = PreZTNodeId h p1 p2
-    let ztOurPrivNodeId = fromMaybe (toPreNodeIdM ztOurNodeId) ztOurPrivNodeIdM
+-- | Creates server environment. Accepts only the host/ports to bind
+-- on, with the exceptin that "localhost" is turned into "127.0.0.1".
+createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTServSettings -> ZTNodeId -> m ZTNetServEnv
+createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
+    ztOurNodeId <- randomZTInternalId
 
-    ztServFront <- Z.socket ctx Z.Router
+    ztServFront <- Z.socket ztContext Z.Router
+    Z.setIdentity (Z.restrict $ unZTInternalId ztOurNodeId) ztServFront
+    Z.bind ztServFront $ ztNodeIdRouter ztBindOn
     ztServFrontAdapter <- newSocketAdapter ztServFront
-    Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServFront
-    Z.bind ztServFront $ endpointTcp (pztIdHost ztOurPrivNodeId)
-                                     (pztIdRouterPort ztOurPrivNodeId)
 
-    ztServPub <- Z.socket ctx Z.Pub
+    ztServPub <- Z.socket ztContext Z.Pub
+    Z.bind ztServPub $ ztNodeIdPub ztBindOn
     ztServPubAdapter <- newSocketAdapter ztServPub
-    Z.setIdentity (Z.restrict $ ztNodeConnectionId ztOurNodeId) ztServPub
-    Z.bind ztServPub $ endpointTcp (pztIdHost ztOurPrivNodeId)
-                                   (pztIdPubPort ztOurPrivNodeId)
 
     ztListeners <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
@@ -124,7 +133,13 @@ createNetServEnv (ZTGlobalEnv ctx ztLogging) ztOurNodeId ztOurPrivNodeIdM = lift
     let modGivenName (GivenName x) = GivenName $ x <> "serv"
         modGivenName x             = x
     let ztServLogging = ztLogging & logNameSelL %~ modGivenName
+    ztLog ztServLogging Debug $ "Set identity: " <> show ztOurNodeId
     pure ZTNetServEnv {..}
+  where
+    ztBindOn = unLocalHost ztBindOn0
+    unLocalHost nId
+        | ztIdHost nId == "localhost" = nId { ztIdHost = "127.0.0.1" }
+        | otherwise = nId
 
 -- | Terminates server environment.
 termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
@@ -140,13 +155,16 @@ data ServBrokerStmRes
     | SBRequest InternalRequest
     deriving (Show)
 
+
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
 runBroker = do
     ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
 
-    let publish k v =
+    let publish k v = do
+            --ztLog ztServLogging Debug "Publishing"
             Z.sendMulti ztServPub $
-            NE.fromList $ [unSubscription k,ztNodeConnectionId ztOurNodeId] ++ v
+              NE.fromList $ [unSubscription k,unZTInternalId ztOurNodeId] ++ v
+            --ztLog ztServLogging Debug "Published"
 
     let processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
@@ -173,7 +191,11 @@ runBroker = do
             Publish k v -> publish k v
 
     let frontToListener = \case
-            (cId:"":msgT:msg) -> do
+            [cId,"",t] | t == tag_getId -> do
+                Z.sendMulti ztServFront $
+                  NE.fromList [cId,"",unZTInternalId ztOurNodeId]
+                ztLog ztServLogging Debug "Received request connection, replied with our id"
+            (cId:"":t:msgT:msg) | t == tag_normal -> do
                 ztEnv <- atomically $ runMaybeT $ do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
@@ -185,9 +207,10 @@ runBroker = do
             _ -> ztLog ztServLogging Warning "frontToListener: wrong format"
 
     let hbWorker = forever $ do
-            let heartbeatInterval = 300000 -- 300 ms
-            threadDelay heartbeatInterval
-            atomically $ TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
+            threadDelay $
+                (fromIntegral $ zsHeartbeatsInterval ztServSettings) * 1000
+            atomically $
+                TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
 
     liftIO $ A.withAsync hbWorker $ const $ do
       let action = liftIO $ do
@@ -211,13 +234,19 @@ runBroker = do
                   SBListener _lId msg -> processMsg msg
                   SBFront             -> whileM (canReceive ztServFront) $
                                          Z.receiveMulti ztServFront >>= frontToListener
-      forever action `catchAny`
-          (\e -> ztLog ztServLogging Warning $ "Server broker exited: " <> show e)
+
+      forever $
+          (forever action)
+          `catchAny`
+          (\e -> do ztLog ztServLogging Error $
+                        "Server broker exited, restarting in 2s: " <> show e
+                    threadDelay 2000000)
 
 registerListener ::
-       (MonadReader r m, MonadIO m)
-    => ServRequestQueue -> ListenerId -> Set MsgType -> m ZTListenerEnv
-registerListener queue lName msgTypes = do
+       (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m)
+    => ListenerId -> Set MsgType -> m ZTListenerEnv
+registerListener lName msgTypes = do
+    queue <- ztServRequestQueue <$> view (lensOf @ZTNetServEnv)
     let servRequestQueue = unServRequestQueue queue
     liftIO $ do
         biTQueue <- newBtq
