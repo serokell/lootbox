@@ -3,25 +3,28 @@
  - file, You can obtain one at http://mozilla.org/MPL/2.0/.
  -}
 
-{-# LANGUAGE DataKinds     #-}
-{-# LANGUAGE TypeFamilies  #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds        #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE TypeOperators    #-}
 
 module Test.Loot.Config where
 
 import Data.Aeson (FromJSON, eitherDecode)
 import Loot.Base.HasLens (lensOf)
+import Options.Applicative (Parser, auto, defaultPrefs, execParserPure, getParseResult, info, long)
+import qualified Options.Applicative as O
 
 import Loot.Config
 
 import Hedgehog (Property, forAll, property, (===))
-import Test.Tasty.HUnit (Assertion, assertFailure, (@=?))
+import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, (@=?))
 
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
-newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Generic,FromJSON)
-newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,Generic,FromJSON)
+newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON)
+newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON)
 
 type Fields = '[ "str" ::: String
                , "int" ::: Int
@@ -213,3 +216,60 @@ unit_finalise = do
             finalCfg ^. (lensOf @SomeMem) @=? (SomeMem "bye")
             finalCfg ^. (lensOfC @('["kek"])) @=? (SomeKek 999)
             finalCfg ^. (lensOfC @('["sub", "sub2", "mem"])) @=? (SomeMem "bye")
+
+----------------------
+-- CLI modifications
+----------------------
+
+runCliArgs :: Parser a -> [String] -> Maybe a
+runCliArgs p = getParseResult . execParserPure defaultPrefs (info p mempty)
+
+fieldsParser :: OptModParser Fields
+fieldsParser =
+    #str .:: (O.strOption $ long "str") <*<
+    #int .:: (O.option auto $ long "int") <*<
+    #sub .:<
+        (#int2 .:: (O.option auto $ long "int2") <*<
+         #bool .:: (O.flag' True $ long "bool") <*<
+         #sub2 .:<
+              (#str2 .:: (O.strOption $ long "str2") <*<
+               #mem .:: (O.strOption $ long "mem"))
+        ) <*<
+    #kek .:: (O.option auto $ long "kek")
+
+unit_cliOverrideEmptyId :: Assertion
+unit_cliOverrideEmptyId = do
+    noMod <- maybe (assertFailure "Config parser fails on empty arguments") pure $
+             runCliArgs fieldsParser []
+    noMod cfg @=? cfg
+    noMod fullConfig @=? fullConfig
+
+someArgs :: [String]
+someArgs =
+    [ "--int", "228"
+    , "--mem", "hi"
+    , "--bool"
+    , "--kek", "SomeKek 777"
+    ]
+
+unit_cliOverrideSetNew :: Assertion
+unit_cliOverrideSetNew = do
+    someMod <- maybe (assertFailure "Config parser failed") pure $
+               runCliArgs fieldsParser someArgs
+    let cfg1 = someMod cfg
+    assertEqual "CLI parser modifies empty config incorrectly" cfg1 $
+        cfg & option #int ?~ 228
+            & sub #sub . option #bool ?~ True
+            & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "hi")
+            & option #kek ?~ (SomeKek 777)
+
+unit_cliOverrideModExisting :: Assertion
+unit_cliOverrideModExisting = do
+    someMod <- maybe (assertFailure "Config parser failed") pure $
+               runCliArgs fieldsParser someArgs
+    let cfg1 = someMod fullConfig
+    assertEqual "CLI parser modifies non-empty config incorrectly" cfg1 $
+        fullConfig & option #int ?~ 228
+                   & sub #sub . option #bool ?~ True
+                   & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "hi")
+                   & option #kek ?~ (SomeKek 777)
