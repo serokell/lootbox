@@ -584,7 +584,8 @@ runBroker = do
                 -- If it's nothing it means that we couldn't choose peer
                 -- at random -- the peer list is empty, so we just silently skip.
                 whenJust iIdFinal $ \(unZTInternalId -> iId) ->
-                    Z.sendMulti ztCliBack $ NE.fromList $ [iId, "", "m", unMsgType msgT] ++ msg
+                    Z.sendMulti ztCliBack $ NE.fromList $
+                    [iId, "", tag_normal, unMsgType msgT] ++ msg
 
     let routerToClients (ZTInternalId -> iId) (MsgType -> msgT) msg =
           atomically (HMap.lookup iId <$> peersRevMap ztPeers) >>= \case
