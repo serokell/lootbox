@@ -34,7 +34,7 @@ import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), logNameSelL)
+import Loot.Log.Internal (Severity (..), Logging (..), NameSelector (..), logNameSelL)
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)

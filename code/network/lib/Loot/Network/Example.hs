@@ -19,7 +19,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..))
-import Loot.Log.Internal (Logging (..), NameSelector (GivenName))
+import Loot.Log.Internal (Logging (..), NameSelector (GivenName), Message(..))
 import Loot.Network.BiTQueue (recvBtq, sendBtq)
 import Loot.Network.Class
 import Loot.Network.Utils (whileM)
@@ -76,7 +76,7 @@ log x = liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
 
 withZMQ :: Name -> ZTNodeId -> [ZTNodeId] -> Env () -> Env () -> IO ()
 withZMQ name nId peers server action = do
-    let logFoo l n t = log $ "[" <> show l <> "] " <> show n <> ": " <> t
+    let logFoo (Message l n t) = log $ "[" <> show l <> "] " <> show n <> ": " <> t
     let logging = Logging logFoo (pure $ GivenName name)
     withZTGlobalEnv logging $ \ztEnv -> do
         cliEnv <- createNetCliEnv ztEnv def peers
@@ -171,7 +171,7 @@ testZmq = do
 
 stupid :: IO ()
 stupid = do
-    let logFoo l n t = log $ "[" <> show l <> "] " <> show n <> ": " <> t
+    let logFoo (Message l n t) = log $ "[" <> show l <> "] " <> show n <> ": " <> t
     let logging = Logging logFoo (pure $ GivenName "stupid")
     withZTGlobalEnv logging $ \ZTGlobalEnv{..} -> do
       let addr = "tcp://127.0.0.1:8214"

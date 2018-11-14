@@ -7,7 +7,13 @@ library:
 
   dependencies:
     - aeson
+    - ansi-terminal
+    - bytestring
     - caps
+    - co-log
+    - co-log-core
+    - co-log-sys
+    - componentm
     - dlist
     - fmt
     - hslogger
@@ -15,6 +21,7 @@ library:
     - log-warper
     - microlens
     - microlens-th
+    - monad-control
     - mtl
     - network
     - text

@@ -3,7 +3,6 @@ server:
   port: 1007
 
 logging:
-  loggerTree:
-    main:
-      Main:
-        severity: Debug+
+  backends:
+  - type: stderr
+  min-severity: Debug

@@ -38,7 +38,7 @@ import GHC.Stack (HasCallStack, callStack)
 import System.Random (randomIO, randomRIO)
 import qualified System.ZMQ4 as Z
 
-import Loot.Log.Internal (Level, Logging (..), selectLogName)
+import Loot.Log.Internal (Severity, Logging (..), selectLogName, Message(..))
 import Loot.Network.Class (Subscription (..))
 
 ----------------------------------------------------------------------------
@@ -50,10 +50,10 @@ data ZmqTcp
 
 -- | Logging function for zmq -- doesn't require any monad, uses
 -- 'Logging IO' directly.
-ztLog :: HasCallStack => Logging IO -> Level -> Text -> IO ()
-ztLog Logging{..} level t = do
-    name <- selectLogName callStack <$> _logName
-    _log level name t
+ztLog :: HasCallStack => Logging IO -> Severity -> Text -> IO ()
+ztLog Logging{..} msgSeverity msgContent = do
+    msgName <- selectLogName callStack <$> _logName
+    _log $ Message {..}
 
 -- | Generic tcp address creation helper.
 endpointTcp :: String -> Integer -> String

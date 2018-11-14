@@ -1,8 +1,23 @@
 resolver: snapshot.yaml
 
 extra-deps:
-- git: https://github.com/pasqu4le/hslogger.git
-  commit: 28d5f0cf220a1b7162eaa1535e72e6cad2362ee4
+# Required by co-log and co-log-core
+- contravariant-1.5
+- relude-0.3.0
+- typerep-map-0.3.0
+- primitive-0.6.4.0
+
+- git: https://github.com/kowainik/co-log.git
+  commit: 41cc915e42628c9cc4eea28db2ecdf11bd0e413e
+  subdirs:
+  - co-log-core
+  - co-log
+
+- git: https://github.com/serokell/co-log-sys.git
+  commit: dc1b683eab9a82a1662259fd6cb0907e14e54ea9
+
+- componentm-0.0.0.2
+- teardown-0.5.0.0
 
 packages:
   - code/base

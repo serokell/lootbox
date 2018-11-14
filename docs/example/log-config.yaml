@@ -1,0 +1,28 @@
+# Configuration example for `loot-log`
+# Most options have a default value, so you can set as many of them as you like.
+
+# List of logging backends (in this example there is one for any available type)
+# If you don't specify this list "stdout" will be used as the only backend
+backends:
+  - type: stdout 
+  - type: stderr
+  - type: file
+    path: example.log
+  - type: syslog
+    collector-type: auto # "auto" is also the default value
+    facility: User       # "User" is also the default value
+    app-name: example
+  # Note: there are 2 other collector options that also add properties to syslog:
+  # Local Unix FIFO, not supported under Windows:
+    # collector-type: local
+    # fifo-path: "/dev/log"
+  # Remote Syslog server (with its default values):
+    # collector-type: remote
+    # family: AF_INET
+    # hostname: "localhost"
+    # port-number: 514
+
+# Minimum severity: any Message below this level will be discarded
+# Severities available, from lowest level:
+# Debug, Info, Notice, Warning, Error, Critical, Alert, Emergency
+min-severity: Warning # Debug is the default if you don't specify this
