@@ -15,7 +15,7 @@ module Loot.Demo.Config
        ) where
 
 import Loot.Config ((:::), (::<), ConfigKind (Final, Partial), ConfigRec, option, (?~))
-import Loot.Log.Warper (LoggerConfig)
+import Loot.Log (LogConfig)
 
 
 -- | Our configuration contains:
@@ -35,7 +35,7 @@ type Options =
         '[ "host" ::: String
          , "port" ::: Word16
          ]
-     , "logging" ::: LoggerConfig
+     , "logging" ::: LogConfig
      ]
 
 -- | Type of partial configurations.

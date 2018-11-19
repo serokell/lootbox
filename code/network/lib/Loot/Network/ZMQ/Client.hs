@@ -37,7 +37,7 @@ import qualified Text.Show as T
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Level (..), Logging (..), NameSelector (..), logNameSelL)
+import Loot.Log.Internal (Severity (..), Logging (..), NameSelector (..), logNameSelL)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
 import Loot.Network.ZMQ.Adapter

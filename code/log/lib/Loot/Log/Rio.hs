@@ -1,5 +1,6 @@
 -- | Helpers for defining instances in "ReaderT over IO" approach to monad
 -- stack.
+{-# LANGUAGE RecordWildCards #-}
 
 module Loot.Log.Rio
     ( LoggingIO
@@ -11,7 +12,7 @@ module Loot.Log.Rio
 import Lens.Micro (to)
 import Loot.Base.HasLens (HasLens', lensOf)
 
-import Loot.Log.Internal (Level, Logging (..), Name, NameSelector, logNameSelL)
+import Loot.Log.Internal (Logging (..), NameSelector, logNameSelL, Message (..))
 
 -- | We provide default implementations for @LoggingIO@ because it facilitates
 -- movement of logging capability between different monads (and also we will
@@ -23,10 +24,10 @@ type LoggingIO = Logging IO
 defaultLog
     :: forall m ctx.
        (HasLens' ctx LoggingIO, MonadReader ctx m, MonadIO m)
-    => Level -> Name -> Text -> m ()
-defaultLog l n t = do
+    => Message -> m ()
+defaultLog msg = do
     lg <- view (lensOf @LoggingIO . to _log) <$> ask
-    liftIO $ lg l n t
+    liftIO $ lg msg
 
 -- | Default implementation of 'MonadLogging.logName' (generated with
 -- 'makeCap').
