@@ -9,18 +9,19 @@ module Loot.Log.Actions
        , withLogMessageStderr
        , withLogMessageSyslog
        , withLogMessageFile
+         -- * Utils
+       , withLogAction
        ) where
 
 import Loot.Log.Internal.Message
 
 import Colog.Actions (logByteStringStdout, logByteStringStderr, logByteStringHandle)
-import Colog.Cont (withLogAction)
 import Colog.Core.Action (LogAction(..), cmap)
-import Colog.Syslog.Actions (withLogMessageSyslogGeneric, withLogMessageFileGeneric)
+import Colog.Syslog.Actions (withLogMessageSyslogGeneric)
 import Colog.Syslog.Config (SyslogConfig)
 import Colog.Syslog.Handler (SyslogHandler, logSyslogMessage)
 
-import Control.Monad.Trans.Control (MonadBaseControl)
+import Control.Monad.Trans.Control (MonadBaseControl, liftBaseOp)
 
 -- | 'LogAction' that outputs a 'Message' to stdout
 logMessageStdout :: MonadIO m => LogAction m Message
@@ -52,7 +53,7 @@ withLogMessageStdout = withLogAction logMessageStdout
 withLogMessageStderr :: MonadIO m => (LogAction m Message -> n r) -> n r
 withLogMessageStderr = withLogAction logMessageStderr
 
--- | Continuation-passing style 'LogAction' for syslog beckend. This is based
+-- | Continuation-passing style 'LogAction' for syslog backend. This is based
 -- on 'bracket' and has the advantage of closing the handle when needed.
 withLogMessageSyslog
     :: (MonadBaseControl IO n, MonadIO m)
@@ -61,11 +62,15 @@ withLogMessageSyslog
 withLogMessageSyslog config action =
     withLogMessageSyslogGeneric config (action . cmap toSyslogMessage)
 
--- | Continuation-passing style 'LogAction' for file beckend. This is based
+-- | Continuation-passing style 'LogAction' for file backend. This is based
 -- on 'bracket' and has the advantage of closing the handle when needed.
 withLogMessageFile
     :: (MonadBaseControl IO n, MonadIO m)
     => FilePath
     -> (LogAction m Message -> n r) -> n r
-withLogMessageFile path action =
-    withLogMessageFileGeneric path (action . cmap toSyslogMessage)
+withLogMessageFile path action = liftBaseOp (withFile path AppendMode) $
+    action . cmap fmtMessageFlat . logByteStringHandle
+
+-- | Utility to use a 'LogAction' in continuation-passing style
+withLogAction :: LogAction m msg -> (LogAction m msg -> n r) -> n r
+withLogAction action = \f -> f action

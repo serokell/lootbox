@@ -93,7 +93,7 @@ instance ToJSON BackendConfig where
             , "app-name"  .= appName
             ]
 
--- Semigroup and Monoid instance (especially useful to loot-config)
+-- Semigroup and Monoid instance
 
 instance Semigroup LogConfig where
     lc1 <> lc2 = LogConfig

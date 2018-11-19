@@ -14,7 +14,7 @@ extra-deps:
   - co-log
 
 - git: https://github.com/serokell/co-log-sys.git
-  commit: dc1b683eab9a82a1662259fd6cb0907e14e54ea9
+  commit: a699c4eb00e413eb3cb2e9b34bfc7c1451b21279
 
 - componentm-0.0.0.2
 - teardown-0.5.0.0
