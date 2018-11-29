@@ -7,11 +7,7 @@ packages:
   - vinyl-0.8.1.1
 
   - git: https://github.com/int-index/caps
-    commit: 2f46fc6d5480bdef0a17f64359ad6eb29510dba4
-
-  # for caps
-  - git: https://github.com/mokus0/dependent-sum
-    commit: f8909cb323b4ffa63af6c4e7cb3a9745e6199080
+    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671 
 
   # for serialise
   - cborg-0.2.0.0
