@@ -18,7 +18,7 @@ and, in particular, some relevant patterns:
   http://zguide.zeromq.org/page:all#Heartbeating-for-Paranoid-Pirate
 
 Server:
-* Binds to two ports: ROUTER and PUSH
+* Binds to two ports: ROUTER and PUB.
 * Runs "server broker" in a main thread, which routes requests from
   frontend (ROUTER) to listeners. In other direction, it propagates
   replies and publications from listeners to the outer world.
