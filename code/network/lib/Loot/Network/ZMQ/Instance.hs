@@ -30,7 +30,7 @@ type ReaderIOM r m = (MonadReader r m, MonadIO m)
 -- Client
 ----------------------------------------------------------------------------
 
-runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, HasLens' r ZTGlobalEnv, MonadMask m) => m ()
+runClientDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv, HasLens' r ZTGlobalEnv) => m ()
 runClientDefault = ZC.runBroker
 
 getPeersDefault :: (ReaderIOM r m, HasLens' r ZC.ZTNetCliEnv) => m (Set ZTNodeId)
@@ -55,7 +55,7 @@ registerClientDefault c m s = do
 -- Server
 ----------------------------------------------------------------------------
 
-runServerDefault :: (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv, MonadMask m) => m ()
+runServerDefault :: (ReaderIOM r m, HasLens' r ZS.ZTNetServEnv) => m ()
 runServerDefault = ZS.runBroker
 
 registerListenerDefault ::

@@ -37,7 +37,7 @@ import qualified Text.Show as T
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Severity (..), Logging (..), NameSelector (..), logNameSelL)
+import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNameSelL)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
 import Loot.Network.ZMQ.Adapter
@@ -75,44 +75,48 @@ instance Default ZTCliSettings where
 -- Manipulating peers
 ----------------------------------------------------------------------------
 
--- | Peers info variable. Peer can be either in the connected state
--- which is what you expect usually, or in a transitive "connecting"
--- state. The latter one has the timestamp when the connection was
--- tried to be established so we can abort if the connection takes too
--- long.
---
--- Also, as 'ZTInternalId's are used to index peers when sending info
--- to them, they must be all distinct as well.
-data PeersInfoVar = PeersInfoVar
-    { _pivConnected  :: TVar (HashMap ZTNodeId ZTInternalId)
-    -- ^ Peers we're connected to.
-    , _pivConnecting :: TVar (HashMap ZTNodeId (TimeDurationMs, Z.Socket Z.Dealer, SocketAdapter))
-    -- ^ Argument is POSIX milliseconds representation of connection
-    -- attempt time.
+-- | Peer resources: the pair of sockets -- DEALER to send/receive
+-- requests, SUB to receive updates. And their adapters.
+data PeerRes = PeerRes
+    { prBack        :: !(Z.Socket Z.Dealer)
+      -- ^ Backend which receives data from the network and routes it
+      -- to client workers.
+    , prBackAdapter :: !SocketAdapter
+      -- ^ Socket adapter for backend socket.
+    , prSub         :: !(Z.Socket Z.Sub)
+      -- ^ Subscriber socket which is listening to other nodes'
+      -- updates. It also sends data to clients.
+    , prSubAdapter  :: !SocketAdapter
+      -- ^ Socket adapter for backend socket.
     }
 
-makeLenses ''PeersInfoVar
+-- | Initialise peer resources.
+newPeerRes :: Z.Context -> IO PeerRes
+newPeerRes ztContext = do
+    prBack <- Z.socket ztContext Z.Dealer
+    prBackAdapter <- newSocketAdapter prBack
+    Z.setLinger (Z.restrict (0 :: Integer)) prBack
 
--- TODO it's defined here b/c for performance reasons it'd be better
--- to have it in peersInfoVar too and not build from scratch every
--- time.
--- | Build a reverse peers map (for peer resolving).
-peersRevMap :: PeersInfoVar -> STM (HashMap ZTInternalId ZTNodeId)
-peersRevMap piv = do
-    l <- map swap . HMap.toList <$> readTVar (piv ^. pivConnected)
-    let res = HMap.fromList l
+    prSub <- Z.socket ztContext Z.Sub
+    prSubAdapter <- newSocketAdapter prSub
+    Z.subscribe prSub (unSubscription heartbeatSubscription)
 
-    when (HMap.size res /= length l) $
-        error $ "peersRevMap: values collision" <> show l
-    pure res
+    pure PeerRes{..}
+
+-- | Release the sockets and adapters of PeerRes.
+releasePeerRes :: PeerRes -> IO ()
+releasePeerRes PeerRes{..} = do
+    adapterRelease prBackAdapter
+    Z.close prBack
+    adapterRelease prSubAdapter
+    Z.close prSub
+
+-- | Peers info variable. Each peer is mapped to its resources.
+type PeersInfoVar = TVar (HashMap ZTNodeId PeerRes)
 
 ----------------------------------------------------------------------------
 -- Heartbeats
 ----------------------------------------------------------------------------
-
--- Integer arithmetic is used here instead of UTCTime manipulation
--- because it is all scoped (not an external API) and also (possibly)
--- faster.
 
 data HeartbeatState = HeartbeatState
     { _hbInterval :: TimeDurationMs
@@ -197,35 +201,6 @@ instance T.Show InternalRequest where
 hmKeys :: HashMap k a -> HashSet k
 hmKeys = HSet.fromMap . HMap.map (const ())
 
--- Reformulates peers update request in terms of current peer info
--- var, returning the set of add/del nodes. Doesn't change PIV itself.
-applyUpdatePeers ::
-       PeersInfoVar
-    -> ZTUpdatePeersReq
-    -> STM ([ZTNodeId], [ZTNodeId])
-applyUpdatePeers piv UpdatePeersReq{..} = do
-    -- Normalising the request
-    let both = L.nub $ _uprDel `L.intersect` _uprAdd
-    let add' = L.nub _uprAdd L.\\ both
-    let del' = L.nub _uprDel L.\\ both
-
-    -- Processing
-    nowConnected <- readTVar $ piv ^. pivConnected
-    nowConnecting <- readTVar $ piv ^. pivConnecting
-    let allConnected = HSet.toList $ hmKeys nowConnected `HSet.union` hmKeys nowConnecting
-    -- We're adding all peers asked which were not connect(ed/ing)
-    let toAdd = add' L.\\ allConnected
-
-    -- And deleting all who are not connected. Another semantics would
-    -- be to disconnect only those who are connected, but we also
-    -- disconnect connectING peers as well.
-    let toDel = del' L.\\ allConnected
-
-    let res = (toAdd, toDel)
-    when (toAdd `L.intersect` toDel /= []) $
-        error $ "applyUpdatePeers: malformed response: " <> show res
-    pure res
-
 -- | Wrapper over client request queue. CLient broker listens to this.
 newtype CliRequestQueue = CliRequestQueue
     { unCliRequestQueue :: TQueue InternalRequest
@@ -241,19 +216,8 @@ type ZTClientEnv = BiTQueue (ZTNodeId, CliRecvMsg) (Maybe ZTNodeId, (MsgType, Co
 -- (main client worker).
 data ZTNetCliEnv = ZTNetCliEnv
     {
-      ztCliBack         :: !(Z.Socket Z.Router)
-      -- ^ Backend which receives data from the network and routes it
-      -- to client workers.
-    , ztCliBackAdapter  :: !SocketAdapter
-      -- ^ Socket adapter for backend socket.
-    , ztCliSub          :: !(Z.Socket Z.Sub)
-      -- ^ Subscriber socket which is listening to other nodes'
-      -- updates. It also sends data to clients.
-    , ztCliSubAdapter   :: !SocketAdapter
-      -- ^ Socket adapter for backend socket.
-
-    , ztPeers           :: !PeersInfoVar
-      -- ^ Information about peers.
+      ztPeers           :: !PeersInfoVar
+      -- ^ Peers and their resources.
     , ztHeartbeatInfo   :: !(TVar (Map ZTNodeId HeartbeatState))
       -- ^ Information about connection and current heartbeating
       -- state.
@@ -279,17 +243,8 @@ data ZTNetCliEnv = ZTNetCliEnv
 -- | Creates client environment.
 createNetCliEnv :: MonadIO m => ZTGlobalEnv -> ZTCliSettings -> [ZTNodeId] -> m ZTNetCliEnv
 createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
-    ztCliBack <- Z.socket ztContext Z.Router
-    ztCliBackAdapter <- newSocketAdapter ztCliBack
-    Z.setLinger (Z.restrict (0 :: Integer)) ztCliBack
-
-    ztCliSub <- Z.socket ztContext Z.Sub
-    ztCliSubAdapter <- newSocketAdapter ztCliSub
-    Z.subscribe ztCliSub (unSubscription heartbeatSubscription)
-
     ztClients <- newTVarIO mempty
-    ztPeers <- PeersInfoVar <$> newTVarIO HMap.empty
-                            <*> newTVarIO HMap.empty
+    ztPeers <- newTVarIO mempty
     ztHeartbeatInfo <- newTVarIO mempty
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
@@ -307,105 +262,95 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
 -- | Terminates client environment.
 termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
 termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
-    adapterRelease ztCliBackAdapter
-    Z.close ztCliBack
-    adapterRelease ztCliSubAdapter
-    Z.close ztCliSub
     -- Free the dealer sockets/adapters for peers we're currently
     -- connecting to.
-    peersResources <-
-        atomically $ HMap.elems <$> readTVar (ztPeers ^. pivConnecting)
-    forM_ peersResources $ \(_,sock,adapter) ->
-        Z.close sock >> adapterRelease adapter
+    peersResources <- atomically $ HMap.elems <$> readTVar ztPeers
+    forM_ peersResources releasePeerRes
 
 -- Connects/disconnects peers at request.
 changePeers :: MonadIO m => ZTGlobalEnv -> ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
 changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
     curTime <- getCurrentTimeMs
 
-    -- We pre-create sockets to use them in the STM. The number may be
-    -- slightly more than the real number used (due to the possibly
-    -- incorrect request), but we'll cleanup right after.
-    sockets <- replicateM (length $ req ^. uprAdd) (Z.socket ztContext Z.Dealer)
-    adapters <- mapM newSocketAdapter sockets
+    -- We pre-create resources to use them in the STM. The number may
+    -- be slightly more than the real number used (due to the possibly
+    -- incorrect request trying to connect already connected peers),
+    -- but we'll cleanup right after. We do it because we want to
+    -- process everything in one atomically block (with one view over
+    -- current peers).
+    resources <- replicateM (length $ req ^. uprAdd) (newPeerRes ztContext)
 
-    (toConnect,toDisconnect) <- atomically $ do
-        -- Process request
+    (toConnect,toRelease,allSubs) <- atomically $ do
+        -- Process request.
         (toAdd,toDel) <- applyUpdatePeers ztPeers req
 
+        (toRelease :: [(ZTNodeId,PeerRes)]) <-
+            (\p -> mapMaybe (\d -> (d,) <$> HMap.lookup d p) toDel) <$> readTVar ztPeers
+        let (toAddFinal :: HashMap ZTNodeId PeerRes) =
+                HMap.fromList (toAdd `zip` resources)
+
         -- Modify actual variables content.
-        modifyTVar (ztPeers ^. pivConnected) $! \p ->
+        modifyTVar ztPeers $! \p ->
             p `HMap.difference` HMap.fromList (map (,()) toDel)
-        let addInfo = zipWith (\s a -> (curTime,s,a)) sockets adapters
-        modifyTVar (ztPeers ^. pivConnecting) $! \p ->
-            p `HMap.union` HMap.fromList (toAdd `zip` addInfo)
-
+        modifyTVar ztPeers $ (`HMap.union` toAddFinal)
         -- Remove them from the heartbeating worker.
+
+        -- Update heartbeat worker state
+        let initHbs = HeartbeatState
+                (zsHBIntervalMin ztCliSettings)
+                (zsHBLivenessMax ztCliSettings)
+                curTime
+                False
         modifyTVar ztHeartbeatInfo $
-            foldr (.) id (map (\nId -> at nId .~ Nothing) toDel)
+            foldr (.) id (map (\nId -> at nId .~ Nothing) toDel) .
+            foldr (.) id (map (\nId -> at nId .~ Just initHbs) toAdd)
 
-        -- Initialise related heartbeating context
-        pure (toAdd,toDel)
+        allSubscriptions <- Map.keys <$> readTVar ztSubscriptions
 
-    forM_ toDisconnect $ \z -> do
-        Z.disconnect ztCliBack $ ztNodeIdRouter z
-        Z.disconnect ztCliSub $ ztNodeIdPub z
-    unless (null toDisconnect) $
-        ztLog ztCliLogging Info $ "changePeers: disconnected " <> show toDisconnect
+        pure (toAdd,toRelease,allSubscriptions)
+
+    forM_ toRelease $ \(_,res) -> releasePeerRes res
+    unless (null toRelease) $
+        ztLog ztCliLogging Info $ "changePeers: disconnected " <> show (map fst toRelease)
+
     unless (null toConnect) $ do
         -- We connect all dealer sockets and send a connection request
         -- message.
-        forM_ (toConnect `zip` sockets) $ \(z,d) -> do
-            Z.connect d $ ztNodeIdRouter z
-            Z.sendMulti d $ NE.fromList ["",tag_getId]
+        forM_ (toConnect `zip` resources) $ \(z,PeerRes{..}) -> do
+            Z.connect prBack $ ztNodeIdRouter z
+            Z.connect prSub $ ztNodeIdPub z
+            forM_ allSubs $ \(Subscription s) -> Z.subscribe prSub s
         ztLog ztCliLogging Debug $
-            "changePeers: preconnecting (sending req) to " <> show toConnect
+            "changePeers: connecting to " <> show toConnect
 
-    -- Release sockes that were not used.
-    let dataLeft = drop (length toConnect) $ sockets `zip` adapters
-    forM_ dataLeft $ \(sock,adapter) -> Z.close sock >> adapterRelease adapter
+    -- Release resources that were not used.
+    let resourcesLeft = drop (length toConnect) resources
+    forM_ resourcesLeft releasePeerRes
+  where
+    -- Reformulates peers update request in terms of current peer info
+    -- var, returning the set of add/del nodes. Doesn't change PIV itself.
+    applyUpdatePeers ::
+           PeersInfoVar
+        -> ZTUpdatePeersReq
+        -> STM ([ZTNodeId], [ZTNodeId])
+    applyUpdatePeers piv UpdatePeersReq{..} = do
+        -- Normalising the request
+        let both = L.nub $ _uprDel `L.intersect` _uprAdd
+        let add' = L.nub _uprAdd L.\\ both
+        let del' = L.nub _uprDel L.\\ both
 
--- Continues connection request (moves peer from "connecting" to
--- "connected" state).
-contConnectionReq ::
-       ZTGlobalEnv -> ZTNetCliEnv -> ZTNodeId -> ZTInternalId -> IO ()
-contConnectionReq ZTGlobalEnv{..} ZTNetCliEnv{..} nodeId iId = do
-    curTime <- getCurrentTimeMs
-    resourcesM <- atomically $ do
-        clash <- HMap.member iId <$> peersRevMap ztPeers
-        if clash
-        then pure Nothing
-        else do
-            (_,sock,adapter) <-
-                fromMaybe (error $ "contConnectionReq: cant find by nodeId") .
-                HMap.lookup nodeId <$>
-                readTVar (ztPeers ^. pivConnecting)
-            modifyTVar (ztPeers ^. pivConnected) $ HMap.insert nodeId iId
-            modifyTVar (ztPeers ^. pivConnecting) $ HMap.delete nodeId
+        currentPeers <- HSet.toList . hmKeys <$> readTVar piv
 
-            let initHbs = HeartbeatState
-                    (zsHBIntervalMin ztCliSettings)
-                    (zsHBLivenessMax ztCliSettings)
-                    curTime
-                    False
-            modifyTVar ztHeartbeatInfo $ at nodeId .~ Just initHbs
+        -- We're adding all peers asked which were not connected.
+        -- And deleting all who are not connected.
+        let toAdd = add' L.\\ currentPeers
+        let toDel = del' L.\\ currentPeers
+        let res = (toAdd, toDel)
+        when (toAdd `L.intersect` toDel /= []) $
+            error $ "applyUpdatePeers: malformed response: " <> show res
+        pure res
 
-            pure $ Just (sock,adapter)
-
-    let onNothing =
-            ztLog ztCliLogging Warning $
-                "contConnectionReq: internal identity " <>
-                "collision, didn't connect peer with iid" <> show nodeId
-    let onJust (sock,adapter) = do
-            Z.close sock
-            adapterRelease adapter
-            Z.connect ztCliBack $ ztNodeIdRouter nodeId
-            Z.connect ztCliSub $ ztNodeIdPub nodeId
-            ztLog ztCliLogging Debug $
-                "contConnectionReq: successfully connected to " <>
-                show nodeId <> ", " <> show iId
-    maybe onNothing onJust resourcesM
-
+-- A part of heartbeating routine.
 -- Given the set of nodeIDs it disconnects them and connects them
 -- back, doubling their heartbeating interval.
 reconnectPeers :: MonadIO m => ZTNetCliEnv -> Set ZTNodeId -> m ()
@@ -415,8 +360,11 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
         -- NodeIds that we really need to reconnect -- after the HB
         -- requested a reconnect some of the peers could be
         -- disconnected (for instance, at a user's request).
-        allConnected <- readTVar (ztPeers ^. pivConnected)
+        allConnected <- readTVar ztPeers
         let toReconnect = Set.filter (`HMap.member` allConnected) nIds
+        let resources =
+                mapMaybe (\n -> (n,) <$> HMap.lookup n allConnected) $
+                Set.toList toReconnect
 
         -- Multiply by two if we don't exceed the max limit, otherwise
         -- set to the max limit.
@@ -433,50 +381,15 @@ reconnectPeers ZTNetCliEnv{..} nIds = liftIO $ do
 
         modifyTVar ztHeartbeatInfo $ \hbInfo ->
             foldl' (\m nId -> m & at nId %~ upd) hbInfo toReconnect
-        pure toReconnect
+        pure resources
 
     unless (null toReconnect) $
         ztLog ztCliLogging Warning $ "Reconnecting peers: " <> show nIds
-    forM_ toReconnect $ \nId -> do
-        Z.disconnect ztCliBack (ztNodeIdRouter nId)
-        Z.connect ztCliBack (ztNodeIdRouter nId)
-        Z.disconnect ztCliSub (ztNodeIdPub nId)
-        Z.connect ztCliSub (ztNodeIdPub nId)
-
--- This worker cleans up connection attempts that were stuck.
-connectionsWorker :: ZTNetCliEnv -> IO ()
-connectionsWorker ZTNetCliEnv{..} =
-    forever $ action `catchAny` handler
-  where
-    action = forever $ do
-        threadDelay 500000 -- 0.5 sec
-        curTime <- getCurrentTimeMs
-        let timeout = zsConnectingTimeout ztCliSettings
-        let leaveNode (_,(created,_,_))
-                | timeout == -1 = True
-                | otherwise = created + timeout > curTime
-        (disconnected,notConnSockets) <- atomically $ do
-            prev <- readTVar (ztPeers ^. pivConnecting)
-            let (stay,leave) = L.partition leaveNode (HMap.toList prev)
-            writeTVar (ztPeers ^. pivConnecting) (HMap.fromList stay)
-            pure (leave,map (\(_, (_,sock,_)) -> sock) stay)
-        -- Sending messages until connected/disconnected. This
-        -- prevents the situation when the server starts later then
-        -- the client, in which server doesn't receive our first
-        -- handshake request.
-        forM_ notConnSockets $ \dSock ->
-            Z.sendMulti dSock $ NE.fromList ["",tag_getId]
-        unless (null disconnected) $ do
-            ztLog ztCliLogging Warning $
-                "Connecting attempt timeouted for peers: " <>
-                show (map fst disconnected)
-            forM_ disconnected $ \(_,(_,sock,adapter)) ->
-                Z.close sock >> adapterRelease adapter
-    handler e = do
-        ztLog ztCliLogging Error $
-            "Connections timeout worker failed: " <> show e <>
-            ", restarting in 2s"
-        threadDelay 2000000
+    forM_ toReconnect $ \(nId, PeerRes{..}) -> do
+        Z.disconnect prBack (ztNodeIdRouter nId)
+        Z.connect prBack (ztNodeIdRouter nId)
+        Z.disconnect prSub (ztNodeIdPub nId)
+        Z.connect prSub (ztNodeIdPub nId)
 
 ----------------------------------------------------------------------------
 -- Methods
@@ -484,16 +397,14 @@ connectionsWorker ZTNetCliEnv{..} =
 
 data CliBrokerStmRes
     = CBClient ClientId (Maybe ZTNodeId) (MsgType, Content)
-    | CBBack
-    | CBSub
-    | CBDealer ZTNodeId (Z.Socket Z.Dealer)
+    | CBBack (Z.Socket Z.Dealer) ZTNodeId
+    | CBSub (Z.Socket Z.Sub) ZTNodeId
     | CBRequest InternalRequest
 
 instance Show CliBrokerStmRes where
     show (CBClient _ _ _) = "CBClient"
-    show CBBack           = "CBBack"
-    show CBSub            = "CBSub"
-    show (CBDealer _ _)   = "CBDealer"
+    show (CBBack _ _)     = "CBBack"
+    show (CBSub _ _)      = "CBSub"
     show (CBRequest _)    = "CBRequest"
 
 runBroker ::
@@ -501,7 +412,6 @@ runBroker ::
        , HasLens' r ZTNetCliEnv
        , HasLens' r ZTGlobalEnv
        , MonadIO m
-       , MonadMask m
        )
     => m ()
 runBroker = do
@@ -512,13 +422,13 @@ runBroker = do
 
     -- This function may do something creative (LRU! Lowest ping!),
     -- but instead (for now) it'll just choose a random peer.
-    let choosePeer :: IO (Maybe (ZTNodeId, ZTInternalId))
+    let choosePeer :: IO (Maybe ZTNodeId)
         choosePeer = do
             -- Yes, modulo bias. It shouldn't really matter.
             i <- abs <$> randomIO
             atomically $ do
                 -- We only choose a peer from "connected" list.
-                l <- HMap.toList <$> readTVar (ztPeers ^. pivConnected)
+                l <- HMap.keys <$> readTVar ztPeers
                 pure $ case l of
                     [] -> Nothing
                     _  -> Just $ l L.!! (i `mod` length l)
@@ -558,92 +468,72 @@ runBroker = do
                             insertClientId (Just clientIds) = Just $ Set.insert clientId clientIds
                         in foldl' (\prevMap sub -> Map.alter insertClientId sub prevMap) s subs
 
-                    pure newSubs
-                let newSubs = either (\e -> error $ "Client IRRegister: " <> e) identity res
-                forM_ newSubs $ Z.subscribe ztCliSub . unSubscription
+                    allSubSockets <-
+                        lift $ (map prSub) . HMap.elems <$> readTVar ztPeers
+
+                    pure (newSubs,allSubSockets)
+                let (newSubs,allSubSockets) =
+                        either (\e -> error $ "Client IRRegister: " <> e) identity res
+                forM_ allSubSockets $ \subSocket ->
+                    forM_ newSubs $ Z.subscribe subSocket . unSubscription
                 ztCliLog Debug $ "Registered client " <> show clientId <> " subs " <> show newSubs
 
     let clientToBackend (nodeIdM :: Maybe ZTNodeId) (msgT, msg) = do
 
             -- Getting internal identifier of the node provided (if provided)
-            iIdM <- runMaybeT $ do
-                nodeId <- MaybeT $ pure nodeIdM
-                MaybeT $ HMap.lookup nodeId <$>
-                    atomically (readTVar (ztPeers ^. pivConnected))
+            nodeId' <- maybe choosePeer (pure . Just) nodeIdM
+            whenJust nodeId' $ \nodeId ->
+                atomically (HMap.lookup nodeId <$> readTVar ztPeers) >>= \case
+                    Nothing ->
+                        ztCliLog Warning $
+                        "Coludn't send to peer, can't resolve: " <> show nodeId
+                    Just PeerRes{ prBack } -> do
+                        Z.sendMulti prBack $ NE.fromList $
+                            ["", unMsgType msgT] ++ msg
 
-            if isJust nodeIdM && isNothing iIdM
-            then ztCliLog Warning $ "Coludn't send to peer, can't resolve: " <> show nodeIdM
-            else do
-                -- At this moment either both are nothing or both are just.
+    let routerToClients nodeId (MsgType -> msgT) msg = do
+            onHeartbeat nodeId
+            clientIdM <- atomically $ Map.lookup msgT <$> readTVar ztMsgTypes
+            maybe (ztCliLog Warning $ "routerToClients: couldn't find client " <>
+                                      "with this message type")
+                  (\clientId ->
+                    sendToClient clientId (nodeId, Response msgT msg))
+                  clientIdM
 
-                -- Choosing at random if not provided (both are nothing).
-                (iIdFinal :: Maybe ZTInternalId) <-
-                    maybe (fmap snd <$> choosePeer) (pure . Just) iIdM
-
-
-                -- If it's nothing it means that we couldn't choose peer
-                -- at random -- the peer list is empty, so we just silently skip.
-                whenJust iIdFinal $ \(unZTInternalId -> iId) ->
-                    Z.sendMulti ztCliBack $ NE.fromList $
-                    [iId, "", tag_normal, unMsgType msgT] ++ msg
-
-    let routerToClients (ZTInternalId -> iId) (MsgType -> msgT) msg =
-          atomically (HMap.lookup iId <$> peersRevMap ztPeers) >>= \case
-            Nothing ->
-                ztCliLog Warning $ "routerToClients: couldn't resolve the node"
-            Just nodeId -> do
-                onHeartbeat nodeId
-                clientIdM <- atomically $ Map.lookup msgT <$> readTVar ztMsgTypes
-                maybe (ztCliLog Warning $ "routerToClients: couldn't find client " <>
-                                          "with this message type")
-                      (\clientId ->
-                        sendToClient clientId (nodeId, Response msgT msg))
-                      clientIdM
-
-    let subToClients (Subscription -> subK) (ZTInternalId -> iId) content =
-            atomically (HMap.lookup iId <$> peersRevMap ztPeers) >>= \case
-              Just nodeId -> do
-                  onHeartbeat nodeId
-                  unless (subK == heartbeatSubscription) $ do
-                      cids <-
-                          atomically $
-                          fromMaybe mempty . Map.lookup subK <$>
-                          readTVar ztSubscriptions
-                      forM_ cids $ \clientId ->
-                          sendToClient clientId (nodeId, Update subK content)
-              Nothing -> ztCliLog Warning $ "subToClients: can't resolve iId" <> show iId
+    let subToClients nodeId (Subscription -> subK) content = do
+            onHeartbeat nodeId
+            unless (subK == heartbeatSubscription) $ do
+                cids <-
+                    atomically $
+                    fromMaybe mempty . Map.lookup subK <$>
+                    readTVar ztSubscriptions
+                forM_ cids $ \clientId ->
+                    sendToClient clientId (nodeId, Update subK content)
 
     -- Receiving functions
 
-    let receiveBack =
-            whileM (canReceive ztCliBack) $ Z.receiveMulti ztCliBack >>= \case
-                (addr:"":msgT:msg) -> routerToClients addr msgT msg
-                _ -> ztCliLog Warning $ "receiveBack: malformed message"
+    let receiveBack back nodeId =
+            whileM (canReceive back) $ Z.receiveMulti back >>= \case
+                ("":msgT:msg) -> routerToClients nodeId msgT msg
+                _ -> ztCliLog Warning $
+                    "receiveBack: malformed message from " <> show nodeId
 
-    let receiveSub =
-          whileM (canReceive ztCliSub) $ Z.receiveMulti ztCliSub >>= \case
-              (subK:iId:content) -> subToClients subK iId content
-              _ -> ztCliLog Warning $ "receiveSub: malformed message"
-
-    let receiveDealer nId d =
-            -- We receive once only b/c if we succeed, this dealer
-            -- socket becomes closed.
-            whenM (canReceive d) $ Z.receiveMulti d >>= \case
-                ["",iId] -> contConnectionReq gEnv cEnv nId (ZTInternalId iId)
-                _ -> ztCliLog Warning $ "receiveDealer: malformed message"
+    let receiveSub sub nodeId =
+            whileM (canReceive sub) $ Z.receiveMulti sub >>= \case
+                (subK:content) -> subToClients nodeId subK content
+                _ -> ztCliLog Warning $
+                    "receiveSub: malformed message from " <> show nodeId
 
     -- Runner
     let withWorkers action =
              A.withAsync (heartbeatWorker ztCliSettings ztHeartbeatInfo ztCliRequestQueue) $ const $
-             A.withAsync (connectionsWorker cEnv) $ const $
              action
 
     liftIO $ withWorkers $ do
       let action = do
               results <- atomically $ do
                   cMap <- readTVar ztClients
-                  connecting <-
-                      HMap.toList <$> readTVar (ztPeers ^. pivConnecting)
+                  peersInfo <- HMap.toList <$> readTVar ztPeers
                   let boolToMaybe t = bool Nothing (Just t)
                   let readReq =
                           fmap CBRequest <$>
@@ -654,30 +544,30 @@ runBroker = do
                                   fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
                                   TQ.tryReadTQueue (bSendQ biq))
                               (Map.toList cMap)
-                  let readDealers :: [STM (Maybe CliBrokerStmRes)]
-                      readDealers =
-                          map (\(nId, (_,sock,adapter)) ->
-                                boolToMaybe (CBDealer nId sock) <$>
-                                adapterTry adapter)
-                              connecting
-                  atLeastOne $ NE.fromList $
-                      [ readReq
-                      , boolToMaybe CBSub <$> adapterTry ztCliSubAdapter
-                      , boolToMaybe CBBack <$> adapterTry ztCliBackAdapter
-                      ] ++ readClient ++ readDealers
+                  let readBacksSubs =
+                          concatMap
+                          (\(nId, PeerRes{..}) ->
+                            [ boolToMaybe (CBSub prSub nId) <$> adapterTry prSubAdapter
+                            , boolToMaybe (CBBack prBack nId) <$> adapterTry prBackAdapter])
+                          peersInfo
+                  atLeastOne $ NE.fromList $ readReq : readBacksSubs ++ readClient
               forM_ results $ \case
                   CBRequest r             -> processReq r
                   CBClient _cId nIdM cont -> clientToBackend nIdM cont
-                  CBBack                  -> receiveBack
-                  CBSub                   -> receiveSub
-                  CBDealer n d            -> receiveDealer n d
+                  (CBBack dealer nId)     -> receiveBack dealer nId
+                  (CBSub sub nId)         -> receiveSub sub nId
 
       -- DSCP-177 Sockets must be processed at least once in the beginning
       -- for 'threadWaitRead' to function correctly later. This is not a
       -- solution, but a workaround -- I haven't managed to find the
-      -- explanatian of why does it happen (@volhovm).
-      receiveBack
-      receiveSub
+      -- explanation of why does it happen (@volhovm).
+      -- TODO
+      -- TODO
+      -- TODO
+      -- TODO
+      -- TODO
+      --receiveBack
+      --receiveSub
 
       forever $
           (forever action)
@@ -695,11 +585,11 @@ getPeers ::
        (MonadReader r m, HasLens' r ZTNetCliEnv, MonadIO m) => m (Set ZTNodeId)
 getPeers = do
     peersVar <- ztPeers <$> view (lensOf @ZTNetCliEnv)
-    Set.fromList . HMap.keys <$> readTVarIO (peersVar ^. pivConnected)
+    Set.fromList . HMap.keys <$> readTVarIO peersVar
 
 -- | Register a new client.
 registerClient ::
-       (MonadReader r m, MonadIO m)
+       (MonadIO m)
     => CliRequestQueue
     -> ClientId
     -> Set MsgType
@@ -712,7 +602,7 @@ registerClient (unCliRequestQueue -> cliRequestQueue) clientId msgTs subs = lift
 
 -- | Updates peers.
 updatePeers ::
-       (MonadReader r m, MonadIO m)
+       (MonadIO m)
     => CliRequestQueue
     -> ZTUpdatePeersReq
     -> m ()

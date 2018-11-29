@@ -30,11 +30,10 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Text.Show as T
 
-import qualified Data.Restricted as Z
 import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..), HasLens')
-import Loot.Log.Internal (Severity (..), Logging (..), NameSelector (..), logNameSelL)
+import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNameSelL)
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
@@ -82,10 +81,8 @@ type ZTListenerEnv = BiTQueue (ZTCliId, MsgType, Content) ZTServSendMsg
 
 -- | A context for the broker, mustn't be modified manually.
 data ZTNetServEnv = ZTNetServEnv
-    { ztOurNodeId        :: !ZTInternalId
-      -- ^ Our identifier, in case we need it to send someone
-      -- explicitly (e.g. when PUBlishing).
-    , ztServFront        :: !(Z.Socket Z.Router)
+    {
+      ztServFront        :: !(Z.Socket Z.Router)
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
     , ztServFrontAdapter :: !SocketAdapter
@@ -115,10 +112,7 @@ data ZTNetServEnv = ZTNetServEnv
 -- on, with the exceptin that "localhost" is turned into "127.0.0.1".
 createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTServSettings -> ZTNodeId -> m ZTNetServEnv
 createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
-    ztOurNodeId <- randomZTInternalId
-
     ztServFront <- Z.socket ztContext Z.Router
-    Z.setIdentity (Z.restrict $ unZTInternalId ztOurNodeId) ztServFront
     Z.bind ztServFront $ ztNodeIdRouter ztBindOn
     ztServFrontAdapter <- newSocketAdapter ztServFront
 
@@ -133,7 +127,6 @@ createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
     let modGivenName (GivenName x) = GivenName $ x <> "serv"
         modGivenName x             = x
     let ztServLogging = ztLogging & logNameSelL %~ modGivenName
-    ztLog ztServLogging Debug $ "Set identity: " <> show ztOurNodeId
     pure ZTNetServEnv {..}
   where
     ztBindOn = unLocalHost ztBindOn0
@@ -156,15 +149,12 @@ data ServBrokerStmRes
     deriving (Show)
 
 
-runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m, MonadMask m) => m ()
+runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m) => m ()
 runBroker = do
     ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
 
-    let publish k v = do
-            --ztLog ztServLogging Debug "Publishing"
-            Z.sendMulti ztServPub $
-              NE.fromList $ [unSubscription k,unZTInternalId ztOurNodeId] ++ v
-            --ztLog ztServLogging Debug "Published"
+    let publish k v =
+            Z.sendMulti ztServPub $ NE.fromList $ [unSubscription k] ++ v
 
     let processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
@@ -191,11 +181,7 @@ runBroker = do
             Publish k v -> publish k v
 
     let frontToListener = \case
-            [cId,"",t] | t == tag_getId -> do
-                Z.sendMulti ztServFront $
-                  NE.fromList [cId,"",unZTInternalId ztOurNodeId]
-                ztLog ztServLogging Debug "Received request connection, replied with our id"
-            (cId:"":t:msgT:msg) | t == tag_normal -> do
+            (cId:"":msgT:msg) -> do
                 ztEnv <- atomically $ runMaybeT $ do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners

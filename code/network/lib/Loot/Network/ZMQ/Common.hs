@@ -14,8 +14,6 @@ module Loot.Network.ZMQ.Common
     , parseZTNodeId
     , ztNodeIdRouter
     , ztNodeIdPub
-    , ZTInternalId (..)
-    , randomZTInternalId
 
       -- | Global environment
     , ZTGlobalEnv(..)
@@ -25,20 +23,16 @@ module Loot.Network.ZMQ.Common
 
       -- | Internal messages
     , heartbeatSubscription
-    , tag_getId
-    , tag_normal
     ) where
 
 import Prelude hiding (log)
 
 import Codec.Serialise (Serialise)
-import qualified Data.ByteString as BS
 import qualified Data.List as L
 import GHC.Stack (HasCallStack, callStack)
-import System.Random (randomIO, randomRIO)
 import qualified System.ZMQ4 as Z
 
-import Loot.Log.Internal (Severity, Logging (..), selectLogName, Message(..))
+import Loot.Log.Internal (Logging (..), Message (..), Severity, selectLogName)
 import Loot.Network.Class (Subscription (..))
 
 ----------------------------------------------------------------------------
@@ -96,22 +90,6 @@ ztNodeIdRouter ZTNodeId{..} = endpointTcp ztIdHost ztIdRouterPort
 ztNodeIdPub :: ZTNodeId -> String
 ztNodeIdPub ZTNodeId{..} = endpointTcp ztIdHost ztIdPubPort
 
--- | The internal zmq identifier we use to address nodes in ROUTER.
-newtype ZTInternalId = ZTInternalId
-    { unZTInternalId :: ByteString
-    } deriving (Eq, Ord, Show, Generic)
-
-instance Hashable ZTInternalId
-
--- | Generates a random zeromq identity. It's the same as in ZMQ by
--- default -- 5 bytes long, first bit is not zero.
-randomZTInternalId :: IO ZTInternalId
-randomZTInternalId = do
-    -- First bit may not be 0 according to ZMQ
-    h <- randomRIO (32,63)
-    t <- replicateM 4 randomIO
-    pure $ ZTInternalId $ BS.pack $ h:t
-
 ----------------------------------------------------------------------------
 -- Zeromq global environment
 ----------------------------------------------------------------------------
@@ -145,15 +123,6 @@ withZTGlobalEnv logFunc action =
 -- Internal messages and commands
 ----------------------------------------------------------------------------
 
--- | Key for heartbeat subscription.
+-- | Key for the heartbeat subscription.
 heartbeatSubscription :: Subscription
 heartbeatSubscription = Subscription "_hb"
-
--- | This indicates that the request on ROUTER is just a request for
--- the node id.
-tag_getId :: ByteString
-tag_getId = "getId"
-
--- | Any other (normal) request except for getId.
-tag_normal :: ByteString
-tag_normal = "n"
