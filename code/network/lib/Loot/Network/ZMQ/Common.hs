@@ -8,6 +8,8 @@ module Loot.Network.ZMQ.Common
       ZmqTcp
     , ztLog
     , endpointTcp
+    , canReceive
+    , atLeastOne
 
       -- | Node identities
     , ZTNodeId(..)
@@ -28,7 +30,9 @@ module Loot.Network.ZMQ.Common
 import Prelude hiding (log)
 
 import Codec.Serialise (Serialise)
+import Control.Monad.STM (retry)
 import qualified Data.List as L
+import qualified Data.List.NonEmpty as NE
 import GHC.Stack (HasCallStack, callStack)
 import qualified System.ZMQ4 as Z
 
@@ -52,6 +56,20 @@ ztLog Logging{..} msgSeverity msgContent = do
 -- | Generic tcp address creation helper.
 endpointTcp :: String -> Integer -> String
 endpointTcp h p = "tcp://" <> h <> ":" <> show p
+
+-- | Checks if data can be received from the socket. Use @whileM
+-- canReceive process@ pattern after the STM action on the needed
+-- socket.
+canReceive :: Z.Socket t -> IO Bool
+canReceive sock = elem Z.In <$> Z.events sock
+
+-- | Given a set of STM actions, returns all that succeed if at least
+-- one does.
+atLeastOne :: NonEmpty (STM (Maybe a)) -> STM (NonEmpty a)
+atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
+    [] -> retry
+    x:xs -> pure $ x :| xs
+
 
 ----------------------------------------------------------------------------
 -- Node identifiers

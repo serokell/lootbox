@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | ZMQ Client implementation.
@@ -19,11 +18,11 @@ module Loot.Network.ZMQ.Client
 
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async as A
-import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
+import Control.Monad.STM (retry)
 import Data.Default (Default (def))
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.HashSet as HSet
@@ -40,8 +39,8 @@ import Loot.Base.HasLens (HasLens (..), HasLens')
 import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNameSelL)
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
-import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common
+import Loot.Network.ZMQ.InternalQueue
 
 ----------------------------------------------------------------------------
 -- Settings
@@ -78,27 +77,21 @@ instance Default ZTCliSettings where
 -- | Peer resources: the pair of sockets -- DEALER to send/receive
 -- requests, SUB to receive updates. And their adapters.
 data PeerRes = PeerRes
-    { prBack        :: !(Z.Socket Z.Dealer)
+    { prBack :: !(Z.Socket Z.Dealer)
       -- ^ Backend which receives data from the network and routes it
       -- to client workers.
-    , prBackAdapter :: !SocketAdapter
-      -- ^ Socket adapter for backend socket.
-    , prSub         :: !(Z.Socket Z.Sub)
+    , prSub  :: !(Z.Socket Z.Sub)
       -- ^ Subscriber socket which is listening to other nodes'
       -- updates. It also sends data to clients.
-    , prSubAdapter  :: !SocketAdapter
-      -- ^ Socket adapter for backend socket.
     }
 
 -- | Initialise peer resources.
 newPeerRes :: Z.Context -> IO PeerRes
 newPeerRes ztContext = do
     prBack <- Z.socket ztContext Z.Dealer
-    prBackAdapter <- newSocketAdapter prBack
     Z.setLinger (Z.restrict (0 :: Integer)) prBack
 
     prSub <- Z.socket ztContext Z.Sub
-    prSubAdapter <- newSocketAdapter prSub
     Z.subscribe prSub (unSubscription heartbeatSubscription)
 
     pure PeerRes{..}
@@ -106,9 +99,7 @@ newPeerRes ztContext = do
 -- | Release the sockets and adapters of PeerRes.
 releasePeerRes :: PeerRes -> IO ()
 releasePeerRes PeerRes{..} = do
-    adapterRelease prBackAdapter
     Z.close prBack
-    adapterRelease prSubAdapter
     Z.close prSub
 
 -- | Peers info variable. Each peer is mapped to its resources.
@@ -148,7 +139,7 @@ updateHeartbeat ZTCliSettings{..} states nodeId = do
 -- the interval.
 heartbeatWorker ::
        ZTCliSettings -> TVar (Map ZTNodeId HeartbeatState) -> CliRequestQueue -> IO ()
-heartbeatWorker ZTCliSettings{..} heartbeatInfo requestQueue = forever $ do
+heartbeatWorker ZTCliSettings{..} heartbeatInfo internalQueue = forever $ do
     threadDelay 50000
     curTime <- getCurrentTimeMs
     let modMap :: [(ZTNodeId, HeartbeatState)]
@@ -174,15 +165,16 @@ heartbeatWorker ZTCliSettings{..} heartbeatInfo requestQueue = forever $ do
                     bimap (map snd) (map snd) $
                     L.partition fst $ map checkPollTime hbMap
             in (Set.fromList (map fst toReconnect), Map.fromList toLeave)
-    atomically $ do
+    toReconnect <- atomically $ do
         hbMap <- readTVar heartbeatInfo
         let (toReconnect,hbMap') = modMap (Map.toList hbMap)
         writeTVar heartbeatInfo hbMap'
-        unless (Set.null toReconnect) $
-            TQ.writeTQueue (unCliRequestQueue requestQueue) (IRReconnect toReconnect)
+        pure toReconnect
+    unless (Set.null toReconnect) $
+        iqSend internalQueue (IRReconnect toReconnect)
 
 ----------------------------------------------------------------------------
--- Internal requests
+-- Internal queue requests
 ----------------------------------------------------------------------------
 
 type ZTUpdatePeersReq = UpdatePeersReq ZTNodeId
@@ -191,20 +183,63 @@ data InternalRequest
     = IRUpdatePeers ZTUpdatePeersReq
     | IRRegister ClientId (Set MsgType) (Set Subscription) ZTClientEnv
     | IRReconnect (Set ZTNodeId)
+    deriving (Generic)
 
 instance T.Show InternalRequest where
     show (IRUpdatePeers r)      = "IRUpdatePeers: " <> show r
     show (IRRegister cId _ _ _) = "IRRegister " <> show cId
     show (IRReconnect nids)     = "IRReconnect" <> show nids
 
--- Get hashmap keys as a hashset.
-hmKeys :: HashMap k a -> HashSet k
-hmKeys = HSet.fromMap . HMap.map (const ())
+type CliRequestQueue = InternalQueue InternalRequest
 
--- | Wrapper over client request queue. CLient broker listens to this.
-newtype CliRequestQueue = CliRequestQueue
-    { unCliRequestQueue :: TQueue InternalRequest
+----------------------------------------------------------------------------
+-- Polling data
+----------------------------------------------------------------------------
+
+data CliPollData = CliPollData
+    { cpdPolls      :: ![Z.Poll Z.Socket IO]
+    , cpdN          :: !Int
+    , cpdResolveMap :: !(HashMap Int (ZTNodeId, PeerRes))
     }
+
+
+recreateCliPollData ::
+       PeersInfoVar -> CliRequestQueue -> ClientsQueue -> STM CliPollData
+recreateCliPollData piv reqQueue cQueue = do
+    peersInfo <- HMap.toList <$> readTVar piv
+    let cpdResolveMap :: HashMap Int (ZTNodeId, PeerRes)
+        cpdResolveMap = HMap.fromList $ [0..] `zip` peersInfo
+    let cpdN = HMap.size cpdResolveMap
+    let resources = map snd peersInfo
+    let toPoll sock = Z.Sock sock [Z.In] Nothing
+    let backPolls = map (toPoll . prBack) resources
+    let subPolls = map (toPoll . prSub) resources
+    let cliPolls = [toPoll (iqOut cQueue)]
+    let reqPolls = [toPoll (iqOut reqQueue)]
+    let cpdPolls = backPolls ++ subPolls ++ cliPolls ++ reqPolls
+    pure CliPollData{..}
+
+-- | This queue is used to transfer messages from clients to the main broker.
+type ClientsQueue = InternalQueue (Maybe ZTNodeId, (MsgType, Content))
+
+-- | This worker reads from clients' bitqueues and forwards these
+-- messages to one socket that is then processed by broker in one big
+-- zmq poll.
+clientsToBrokerWorker :: ZTNetCliEnv -> IO ()
+clientsToBrokerWorker ZTNetCliEnv { ztClientsQueue, ztClients, ztCliLogging } =
+      forever $ (forever action) `catchAny` handler
+  where
+    action = do
+        (results :: NE.NonEmpty (Maybe ZTNodeId, (MsgType, Content))) <-
+           atomically $ do
+            (clientEnvs :: [ZTClientEnv]) <- Map.elems <$> readTVar ztClients
+            when (null clientEnvs) retry
+            atLeastOne $ map (TQ.tryReadTQueue . bSendQ) $ NE.fromList clientEnvs
+        forM_ results (iqSend ztClientsQueue)
+    handler e = do
+        ztLog ztCliLogging Error $
+            "ClientsToBroker worker exited, restarting in 2s: " <> show e
+        threadDelay 2000000
 
 ----------------------------------------------------------------------------
 -- Context
@@ -212,16 +247,20 @@ newtype CliRequestQueue = CliRequestQueue
 
 type ZTClientEnv = BiTQueue (ZTNodeId, CliRecvMsg) (Maybe ZTNodeId, (MsgType, Content))
 
+
 -- | Client environment state. Is to be used by the one thread only
 -- (main client worker).
 data ZTNetCliEnv = ZTNetCliEnv
     {
       ztPeers           :: !PeersInfoVar
       -- ^ Peers and their resources.
+    , ztCliPollData     :: !(TVar CliPollData)
+      -- ^ Data needed for speeding up the polling process.
     , ztHeartbeatInfo   :: !(TVar (Map ZTNodeId HeartbeatState))
       -- ^ Information about connection and current heartbeating
       -- state.
-
+    , ztClientsQueue    :: !ClientsQueue
+      -- ^ Clients queue.
     , ztClients         :: !(TVar (Map ClientId ZTClientEnv))
       -- ^ Channels binding broker to clients, map from client name to.
     , ztSubscriptions   :: !(TVar (Map Subscription (Set ClientId)))
@@ -246,9 +285,11 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
     ztClients <- newTVarIO mempty
     ztPeers <- newTVarIO mempty
     ztHeartbeatInfo <- newTVarIO mempty
+    ztClientsQueue <- newInternalQueue ztContext
     ztSubscriptions <- newTVarIO mempty
     ztMsgTypes <- newTVarIO mempty
-    ztCliRequestQueue <- CliRequestQueue <$> TQ.newTQueueIO
+    ztCliRequestQueue <- newInternalQueue ztContext
+    ztCliPollData <- newTVarIO $ CliPollData mempty 0 mempty
 
     let modGivenName (GivenName x) = GivenName $ x <> "cli"
         modGivenName x             = x
@@ -307,6 +348,11 @@ changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
 
         allSubscriptions <- Map.keys <$> readTVar ztSubscriptions
 
+        -- Update polling data
+        newPollData <-
+            recreateCliPollData ztPeers ztCliRequestQueue ztClientsQueue
+        writeTVar ztCliPollData newPollData
+
         pure (toAdd,toRelease,allSubscriptions)
 
     forM_ toRelease $ \(_,res) -> releasePeerRes res
@@ -338,6 +384,10 @@ changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do
         let both = L.nub $ _uprDel `L.intersect` _uprAdd
         let add' = L.nub _uprAdd L.\\ both
         let del' = L.nub _uprDel L.\\ both
+
+        -- Get hashmap keys as a hashset.
+        let hmKeys :: HashMap k a -> HashSet k
+            hmKeys = HSet.fromMap . HMap.map (const ())
 
         currentPeers <- HSet.toList . hmKeys <$> readTVar piv
 
@@ -527,47 +577,31 @@ runBroker = do
     -- Runner
     let withWorkers action =
              A.withAsync (heartbeatWorker ztCliSettings ztHeartbeatInfo ztCliRequestQueue) $ const $
+             A.withAsync (clientsToBrokerWorker cEnv) $ const $
              action
 
     liftIO $ withWorkers $ do
       let action = do
-              results <- atomically $ do
-                  cMap <- readTVar ztClients
-                  peersInfo <- HMap.toList <$> readTVar ztPeers
-                  let boolToMaybe t = bool Nothing (Just t)
-                  let readReq =
-                          fmap CBRequest <$>
-                          TQ.tryReadTQueue (unCliRequestQueue ztCliRequestQueue)
-                  let readClient :: [STM (Maybe CliBrokerStmRes)]
-                      readClient =
-                          map (\(cliId,biq) ->
-                                  fmap (\(nodeIdM,content) -> CBClient cliId nodeIdM content) <$>
-                                  TQ.tryReadTQueue (bSendQ biq))
-                              (Map.toList cMap)
-                  let readBacksSubs =
-                          concatMap
-                          (\(nId, PeerRes{..}) ->
-                            [ boolToMaybe (CBSub prSub nId) <$> adapterTry prSubAdapter
-                            , boolToMaybe (CBBack prBack nId) <$> adapterTry prBackAdapter])
-                          peersInfo
-                  atLeastOne $ NE.fromList $ readReq : readBacksSubs ++ readClient
-              forM_ results $ \case
-                  CBRequest r             -> processReq r
-                  CBClient _cId nIdM cont -> clientToBackend nIdM cont
-                  (CBBack dealer nId)     -> receiveBack dealer nId
-                  (CBSub sub nId)         -> receiveSub sub nId
+              CliPollData{..} <- atomically $ readTVar ztCliPollData
 
-      -- DSCP-177 Sockets must be processed at least once in the beginning
-      -- for 'threadWaitRead' to function correctly later. This is not a
-      -- solution, but a workaround -- I haven't managed to find the
-      -- explanation of why does it happen (@volhovm).
-      -- TODO
-      -- TODO
-      -- TODO
-      -- TODO
-      -- TODO
-      --receiveBack
-      --receiveSub
+              let resolve i =
+                      fromMaybe (error $ "lookupUnsafe " <> show (i,cpdN)) $
+                      HMap.lookup i cpdResolveMap
+
+              events <- Z.poll (-1) cpdPolls
+              forM_ (events `zip` [0..]) $ \(e,i) ->
+                  unless (null e) $
+                      if | i < cpdN ->
+                           let (nId,res) = resolve i in receiveBack (prBack res) nId
+                         | i < 2 * cpdN ->
+                           let (nId,res) = resolve (i - cpdN) in receiveSub (prSub res) nId
+                         | i == 2 * cpdN -> do
+                               req <- iqReceive ztClientsQueue
+                               whenJust req $ uncurry clientToBackend
+                         | i == 2 * cpdN + 1 -> do
+                               req <- iqReceive ztCliRequestQueue
+                               whenJust req processReq
+                         | otherwise -> error "client broker dispatcher exited"
 
       forever $
           (forever action)
@@ -595,9 +629,9 @@ registerClient ::
     -> Set MsgType
     -> Set Subscription
     -> m ZTClientEnv
-registerClient (unCliRequestQueue -> cliRequestQueue) clientId msgTs subs = liftIO $ do
+registerClient internalQueue clientId msgTs subs = liftIO $ do
     biTQueue <- BiTQueue <$> TQ.newTQueueIO <*> TQ.newTQueueIO
-    atomically $ TQ.writeTQueue cliRequestQueue $ IRRegister clientId msgTs subs biTQueue
+    iqSend internalQueue $ IRRegister clientId msgTs subs biTQueue
     pure biTQueue
 
 -- | Updates peers.
@@ -606,5 +640,5 @@ updatePeers ::
     => CliRequestQueue
     -> ZTUpdatePeersReq
     -> m ()
-updatePeers (unCliRequestQueue -> cliRequestQueue) req =
-    atomically $ TQ.writeTQueue cliRequestQueue $ IRUpdatePeers req
+updatePeers internalQueue req =
+    liftIO $ iqSend internalQueue $ IRUpdatePeers req

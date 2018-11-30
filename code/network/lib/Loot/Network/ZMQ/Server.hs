@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternSynonyms      #-}
-{-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -20,10 +18,10 @@ module Loot.Network.ZMQ.Server
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async as A
-import Control.Concurrent.STM.TQueue (TQueue)
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Monad.Except (runExceptT, throwError)
+import Control.Monad.STM (retry)
 import Data.ByteString (ByteString)
 import Data.Default (Default (def))
 import qualified Data.List.NonEmpty as NE
@@ -37,9 +35,8 @@ import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNam
 import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
-import Loot.Network.ZMQ.Adapter
 import Loot.Network.ZMQ.Common
-
+import Loot.Network.ZMQ.InternalQueue
 
 ----------------------------------------------------------------------------
 -- Server side settings
@@ -66,7 +63,29 @@ instance T.Show InternalRequest where
     show IRHeartBeat          = "IRHeartBeat"
     show (IRRegister lId _ _) = "IRRegister " <> show lId
 
-newtype ServRequestQueue = ServRequestQueue { unServRequestQueue :: TQueue InternalRequest }
+type ServRequestQueue = InternalQueue InternalRequest
+
+----------------------------------------------------------------------------
+-- Listeners to broker
+----------------------------------------------------------------------------
+
+type ListenersQueue = InternalQueue ZTServSendMsg
+
+listenersToBrokerWorker :: ZTNetServEnv -> IO ()
+listenersToBrokerWorker ZTNetServEnv { ztListeners, ztListenersQueue, ztServLogging} =
+      forever $ (forever action) `catchAny` handler
+  where
+    action = do
+        (results :: NE.NonEmpty ZTServSendMsg) <-
+           atomically $ do
+            (listenerEnvs :: [ZTListenerEnv]) <- Map.elems <$> readTVar ztListeners
+            when (null listenerEnvs) retry
+            atLeastOne $ map (TQ.tryReadTQueue . bSendQ) $ NE.fromList listenerEnvs
+        forM_ results (iqSend ztListenersQueue)
+    handler e = do
+        ztLog ztServLogging Error $
+            "listenersToBroker worker exited, restarting in 2s: " <> show e
+        threadDelay 2000000
 
 ----------------------------------------------------------------------------
 -- Methods
@@ -85,16 +104,14 @@ data ZTNetServEnv = ZTNetServEnv
       ztServFront        :: !(Z.Socket Z.Router)
       -- ^ Frontend which is talking to the outer network. Other
       -- nodes/clients connect to it and send requests.
-    , ztServFrontAdapter :: !SocketAdapter
-      -- ^ Front socket adapter.
     , ztServPub          :: !(Z.Socket Z.Pub)
       -- ^ Publishing socket. For publishing.
-    , ztServPubAdapter   :: !SocketAdapter
-      -- ^ Pub socket adapter.
 
     , ztListeners        :: !(TVar (Map ListenerId ZTListenerEnv))
       -- ^ Information about listeners, map from id to info. Id
       -- inside info must match the map key.
+    , ztListenersQueue   :: !ListenersQueue
+      -- ^ Listeners' queue
     , ztMsgTypes         :: !(TVar (Map MsgType ListenerId))
       -- ^ Income message types listeners work with.
 
@@ -114,15 +131,14 @@ createNetServEnv :: MonadIO m => ZTGlobalEnv -> ZTServSettings -> ZTNodeId -> m 
 createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
     ztServFront <- Z.socket ztContext Z.Router
     Z.bind ztServFront $ ztNodeIdRouter ztBindOn
-    ztServFrontAdapter <- newSocketAdapter ztServFront
 
     ztServPub <- Z.socket ztContext Z.Pub
     Z.bind ztServPub $ ztNodeIdPub ztBindOn
-    ztServPubAdapter <- newSocketAdapter ztServPub
 
     ztListeners <- newTVarIO mempty
+    ztListenersQueue <- newInternalQueue ztContext
     ztMsgTypes <- newTVarIO mempty
-    ztServRequestQueue <- ServRequestQueue <$> TQ.newTQueueIO
+    ztServRequestQueue <- newInternalQueue ztContext
 
     let modGivenName (GivenName x) = GivenName $ x <> "serv"
         modGivenName x             = x
@@ -137,9 +153,7 @@ createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
 -- | Terminates server environment.
 termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
 termNetServEnv ZTNetServEnv{..} = liftIO $ do
-    adapterRelease ztServFrontAdapter
     Z.close ztServFront
-    adapterRelease ztServPubAdapter
     Z.close ztServPub
 
 data ServBrokerStmRes
@@ -151,7 +165,7 @@ data ServBrokerStmRes
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m) => m ()
 runBroker = do
-    ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
+    sEnv@ZTNetServEnv{..} <- view $ lensOf @ZTNetServEnv
 
     let publish k v =
             Z.sendMulti ztServPub $ NE.fromList $ [unSubscription k] ++ v
@@ -186,7 +200,7 @@ runBroker = do
                     lId <- MaybeT $ Map.lookup (MsgType msgT) <$> readTVar ztMsgTypes
                     MaybeT $ Map.lookup lId <$> readTVar ztListeners
                 case ztEnv of
-                  Nothing  -> ztLog ztServLogging Warning "frontToListener: can't resolve msgT"
+                  Nothing  -> ztLog ztServLogging Warning $ "frontToListener: can't resolve msgT: " <> show msgT
                   Just biQ ->
                       atomically $ TQ.writeTQueue (bReceiveQ biQ)
                                                   (ZTCliId cId, MsgType msgT, msg)
@@ -195,31 +209,32 @@ runBroker = do
     let hbWorker = forever $ do
             threadDelay $
                 (fromIntegral $ zsHeartbeatsInterval ztServSettings) * 1000
-            atomically $
-                TQ.writeTQueue (unServRequestQueue ztServRequestQueue) IRHeartBeat
+            iqSend ztServRequestQueue IRHeartBeat
 
-    liftIO $ A.withAsync hbWorker $ const $ do
+    liftIO $ A.withAsync hbWorker $ const $
+             A.withAsync (listenersToBrokerWorker sEnv) $ const $ do
+
       let action = liftIO $ do
-              results <- atomically $ do
-                  lMap <- readTVar ztListeners
-                  let readReq =
-                          fmap SBRequest <$>
-                          TQ.tryReadTQueue (unServRequestQueue ztServRequestQueue)
-                  let readListeners :: [STM (Maybe ServBrokerStmRes)]
-                      readListeners =
-                          map (\(listId,biq) ->
-                                 fmap (\content -> SBListener listId content) <$>
-                                 TQ.tryReadTQueue (bSendQ biq))
-                              (Map.toList lMap)
-                  atLeastOne $ NE.fromList $
-                      [ readReq
-                      , (bool Nothing (Just SBFront)) <$> adapterTry ztServFrontAdapter ]
-                                             ++ readListeners
-              forM_ results $ \case
-                  SBRequest r         -> processReq r
-                  SBListener _lId msg -> processMsg msg
-                  SBFront             -> whileM (canReceive ztServFront) $
-                                         Z.receiveMulti ztServFront >>= frontToListener
+              let toPoll sock = Z.Sock sock [Z.In] Nothing
+              let spdPolls =
+                      [ toPoll ztServFront
+                      , toPoll (iqOut ztServRequestQueue)
+                      , toPoll (iqOut ztListenersQueue)
+                      ]
+
+              events <- Z.poll (-1) spdPolls
+              forM_ (events `zip` [(0::Int)..]) $ \(e,i) ->
+                  unless (null e) $
+                      if | i == 0 ->
+                           whileM (canReceive ztServFront) $
+                           Z.receiveMulti ztServFront >>= frontToListener
+                         | i == 1 -> do
+                               req <- iqReceive ztServRequestQueue
+                               whenJust req processReq
+                         | i == 2 -> do
+                               req <- iqReceive ztListenersQueue
+                               whenJust req processMsg
+                         | otherwise -> error "server broker dispatcher exited"
 
       forever $
           (forever action)
@@ -232,11 +247,9 @@ registerListener ::
        (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m)
     => ListenerId -> Set MsgType -> m ZTListenerEnv
 registerListener lName msgTypes = do
-    queue <- ztServRequestQueue <$> view (lensOf @ZTNetServEnv)
-    let servRequestQueue = unServRequestQueue queue
+    servRequestQueue <- ztServRequestQueue <$> view (lensOf @ZTNetServEnv)
     liftIO $ do
         biTQueue <- newBtq
-
-        atomically $ TQ.writeTQueue servRequestQueue $ IRRegister lName msgTypes biTQueue
+        iqSend servRequestQueue $ IRRegister lName msgTypes biTQueue
 
         pure biTQueue
