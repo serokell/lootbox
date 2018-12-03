@@ -21,6 +21,11 @@ module Loot.Config.Record
        , ItemKind
        , (:::)
        , (::<)
+       , (::+)
+       , (::-)
+
+       , SumSelection
+       , ToBranches
 
        , ConfigRec
 
@@ -39,6 +44,12 @@ module Loot.Config.Record
 
        , HasSub
        , sub
+
+       , HasSum
+       , tree
+
+       , HasBranch
+       , branch
        ) where
 
 import Data.Default (Default (..))
@@ -46,8 +57,8 @@ import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
 import Data.Vinyl.Lens (RecElem, rlens, rreplace, type (<:))
 import Data.Vinyl.TypeLevel (RIndex)
-import GHC.TypeLits (ErrorMessage ((:<>:), ShowType, Text), KnownSymbol, Symbol, TypeError,
-                     symbolVal)
+import GHC.TypeLits (AppendSymbol, ErrorMessage ((:<>:), ShowType, Text),
+    KnownSymbol, Symbol, symbolVal, TypeError)
 
 import qualified Text.Show (Show (show))
 
@@ -61,7 +72,11 @@ data ConfigKind
 
 
 -- | Closed kind for items that can be stored in a config.
-data ItemKind = OptionType Symbol Type | SubsectionType Symbol [ItemKind]
+data ItemKind
+    = OptionType Symbol Type
+    | SubsectionType Symbol [ItemKind]
+    | SumType Symbol [ItemKind]
+    | BranchType Symbol [ItemKind]
 
 -- | Type for ordinary configuration options.
 --
@@ -73,6 +88,15 @@ type (:::) = 'OptionType
 -- Example: @"constants" ::< '[ ... ]@
 type (::<) = 'SubsectionType
 
+-- | Type for a tree of configuration possibilities (like a sum-type)
+--
+-- Example: @"connection" ::+ '[ ... ]@
+type (::+) = 'SumType
+
+-- | Type for a branch of a configuration tree (like a sum-type constructor)
+--
+-- Example: @"ftpConnection" ::- '[ ... ]@
+type (::-) = 'BranchType
 
 -- | Type of configuration records of 'ConfigKind' @k@.
 type ConfigRec k = Rec (Item k)
@@ -83,20 +107,45 @@ type family Item' (k :: ConfigKind) (i :: ItemKind) where
     Item' 'Partial (l ::: t)  = Maybe t
     Item' 'Final   (l ::: t)  = t
     Item' k        (l ::< is) = ConfigRec k is
+    Item' 'Partial (l ::+ is) = ConfigRec 'Partial (SumSelection l : ToBranches is)
+    Item' 'Final   (l ::+ is) = ConfigRec 'Final   (SumSelection l : ToBranches is)
+    Item' 'Partial (l ::- is) = ConfigRec 'Partial is
+    Item' 'Final   (l ::- is) = Maybe (ConfigRec 'Final is)
+
+-- | Defines the tree selection option label from the tree label
+type SumSelectionLabel l = AppendSymbol l "Type"
+
+-- | Defines the tree selection option from the tree label
+type SumSelection l = SumSelectionLabel l ::: String
+
+-- | Type family that maps an ItemKind to its BranchType version
+type family ToBranches (is :: [ItemKind]) :: [ItemKind] where
+    ToBranches '[] = '[]
+    ToBranches ((l ::: t) ': xs) = (l ::- '[(l ::: t)]) ': (ToBranches xs)
+    ToBranches ((l ::< t) ': xs) = (l ::- t) ': (ToBranches xs)
+    ToBranches ((l ::+ t) ': xs) = (l ::- '[(l ::+ t)]) ': (ToBranches xs)
+    ToBranches ((l ::- t) ': xs) = (l ::- t) ': (ToBranches xs)
 
 -- | Technical first-class wrapper around the type family to make it possible
 -- to pattern-match on its constructors.
 data Item (k :: ConfigKind) (i :: ItemKind) where
-    ItemOptionP :: Item' 'Partial (l ::: t)  -> Item 'Partial (l ::: t)
-    ItemOptionF :: Item' 'Final   (l ::: t)  -> Item 'Final   (l ::: t)
-    ItemSub     :: Item' k        (l ::< is) -> Item k        (l ::< is)
+    ItemOptionP   :: Item' 'Partial (l ::: t)  -> Item 'Partial (l ::: t)
+    ItemOptionF   :: Item' 'Final   (l ::: t)  -> Item 'Final   (l ::: t)
+    ItemSub       :: Item' k        (l ::< is) -> Item k        (l ::< is)
+    ItemSumP      :: Item' 'Partial (l ::+ is) -> Item 'Partial (l ::+ is)
+    ItemSumF      :: Item' 'Final   (l ::+ is) -> Item 'Final   (l ::+ is)
+    ItemBranchP   :: Item' 'Partial (l ::- is) -> Item 'Partial (l ::- is)
+    ItemBranchF   :: Item' 'Final   (l ::- is) -> Item 'Final   (l ::- is)   
 
 -- | Lens to focus onto the data actually stored inside 'Item'.
 cfgItem :: Functor f => (Item' k d -> f (Item' k d)) -> Item k d -> f (Item k d)
-cfgItem f (ItemOptionP x) = ItemOptionP <$> f x
-cfgItem f (ItemOptionF x) = ItemOptionF <$> f x
-cfgItem f (ItemSub rec)   = ItemSub <$> f rec
-
+cfgItem f (ItemOptionP x)   = ItemOptionP <$> f x
+cfgItem f (ItemOptionF x)   = ItemOptionF <$> f x
+cfgItem f (ItemSub rec)     = ItemSub <$> f rec
+cfgItem f (ItemSumP rec)    = ItemSumP <$> f rec
+cfgItem f (ItemSumF rec)    = ItemSumF <$> f rec
+cfgItem f (ItemBranchP rec) = ItemBranchP <$> f rec
+cfgItem f (ItemBranchF rec) = ItemBranchF <$> f rec
 
 -- | Internal helper used to get the name of an option given the option.
 itemOptionLabel :: forall k l t. KnownSymbol l => Item k (l ::: t) -> String
@@ -106,18 +155,36 @@ itemOptionLabel _ = symbolVal (Proxy :: Proxy l)
 itemSubLabel :: forall k l is. KnownSymbol l => Item k (l ::< is) -> String
 itemSubLabel _ = symbolVal (Proxy :: Proxy l)
 
+-- | Internal helper used to get the name of a sum-type given the subsection.
+itemSumLabel :: forall k l is. KnownSymbol l => Item k (l ::+ is) -> String
+itemSumLabel _ = symbolVal (Proxy :: Proxy l)
+
+-- | Internal helper used to get the name of a branch given the subsection.
+itemBranchLabel :: forall k l is. KnownSymbol l => Item k (l ::- is) -> String
+itemBranchLabel _ = symbolVal (Proxy :: Proxy l)
 
 -- | Require that all labels in the configuration are known.
 type family LabelsKnown is :: Constraint where
     LabelsKnown '[]       = ()
     LabelsKnown ((l ::: _)  ': is) = (KnownSymbol l, LabelsKnown is)
     LabelsKnown ((l ::< us) ': is) = (KnownSymbol l, LabelsKnown us, LabelsKnown is)
+    LabelsKnown ((l ::+ us) ': is) = (KnownSymbol l, LabelsKnown (ToBranches us),
+                                      LabelsKnown is, KnownSymbol (SumSelectionLabel l))
+    LabelsKnown ((l ::- us) ': is) = (KnownSymbol l, LabelsKnown us, LabelsKnown is)
 
 -- | Require that all types of options satisfy a constraint.
 type family ValuesConstrained c is :: Constraint where
     ValuesConstrained _ '[]       = ()
     ValuesConstrained c ((_ ::: v)  ': is) = (c v, ValuesConstrained c is)
     ValuesConstrained c ((_ ::< us) ': is) =
+        ( ValuesConstrained c us
+        , ValuesConstrained c is
+        )
+    ValuesConstrained c ((l ::+ us) ': is) =
+        ( ValuesConstrained c (SumSelection l : ToBranches us)
+        , ValuesConstrained c is
+        )
+    ValuesConstrained c ((_ ::- us) ': is) =
         ( ValuesConstrained c us
         , ValuesConstrained c is
         )
@@ -133,7 +200,17 @@ type family SubRecsConstrained c k is :: Constraint where
         , SubRecsConstrained c k us
         , SubRecsConstrained c k is
         )
-
+    SubRecsConstrained c k ((l ::+ us) ': is) =
+        ( c (ConfigRec k (SumSelection l : ToBranches us))
+        , SubRecsConstrained c k (SumSelection l : ToBranches us)
+        , SubRecsConstrained c k is
+        )
+    SubRecsConstrained c k ((_ ::- us) ': is) =
+        ( c (ConfigRec k us)
+        , c (Maybe (ConfigRec k us))
+        , SubRecsConstrained c k us
+        , SubRecsConstrained c k is
+        )
 
 -----------------------
 -- Finalisation
@@ -165,6 +242,58 @@ finalise = toEither . finalise' ""
         = (:&)
       <$> (ItemSub <$> finalise' (prf <> itemSubLabel item <> ".") rec)
       <*> finalise' prf xs
+    finalise' prf (item@(ItemSumP rec) :& xs)
+        = (:&)
+      <$> (ItemSumF <$> finaliseSum (prf <> itemSumLabel item <> ".") rec)
+      <*> finalise' prf xs
+    finalise' prf (item@(ItemBranchP rec) :& xs)
+        = (:&)
+      <$> (ItemBranchF . Just <$> finalise' (prf <> itemBranchLabel item <> ".") rec)
+      <*> finalise' prf xs
+
+    -- | This function traverses a sum-type configuration, it essentially uses
+    -- the selection option to call 'finaliseBranches' and keeps track of the prefix.
+    finaliseSum
+        :: forall gs l ms. (LabelsKnown gs, gs ~ (SumSelection l : ms))
+        => String                 -- ^ Option name prefix
+        -> ConfigRec 'Partial gs
+        -> Validation [String] (ConfigRec 'Final gs)
+    finaliseSum prf (item :& xs) = case item of
+        ItemOptionP (Just x) -> (:&)
+            <$> Success (ItemOptionF x)
+            <*> finaliseBranches prf (Just x) xs
+        ItemOptionP Nothing -> (:&)
+            <$> Failure [prf <> itemOptionLabel item]
+            <*> finaliseBranches prf Nothing xs
+
+    -- | This function traverses a series of branches, finalizing to 'Nothing'
+    -- all the ones that are not selected, effectively discarding them.
+    finaliseBranches
+        :: forall gs. LabelsKnown gs
+        => String                 -- ^ Option name prefix
+        -> Maybe String           -- ^ The selected branch to look for (if any)
+        -> ConfigRec 'Partial gs
+        -> Validation [String] (ConfigRec 'Final gs)
+    finaliseBranches prf Nothing = \case
+        RNil -> pure RNil
+        (ItemBranchP _ :& xs) -> (:&)
+            <$> Success (ItemBranchF Nothing)
+            <*> finaliseBranches prf Nothing xs
+        _ -> Failure [prf]
+    finaliseBranches prf (Just sel) = \case
+        RNil -> Failure [prf <> sel]
+        (item@(ItemBranchP rec) :& xs) -> if sel == itemBranchLabel item
+            then (:&)
+                <$> (ItemBranchF . Just <$> finalise' (prf <> itemBranchLabel item <> ".") rec)
+                <*> finaliseBranches prf Nothing xs
+            else (:&)
+                <$> Success (ItemBranchF Nothing)
+                <*> finaliseBranches prf (Just sel) xs
+        _ -> Failure [prf]
+        -- This last catastrophic case (as well as the corresponding one before)
+        -- will never happen as long as this function is used on a list of branches.
+        -- It is here just because the type system cannot guarantee this.
+
 
 -- | Similar to 'finalise', but does not instantly fail if some options are
 -- missing, attempt to force them will fail instead.
@@ -176,9 +305,44 @@ finaliseDeferredUnsafe (item@(ItemOptionP opt) :& ps) =
     in ItemOptionF (opt ?: error failureMsg) :& finaliseDeferredUnsafe ps
 finaliseDeferredUnsafe (ItemSub part :& ps) =
     ItemSub (finaliseDeferredUnsafe part) :& finaliseDeferredUnsafe ps
+finaliseDeferredUnsafe (ItemSumP part :& ps) =
+    ItemSumF (finaliseDeferredUnsafeSum part) :& finaliseDeferredUnsafe ps
+finaliseDeferredUnsafe (ItemBranchP part :& ps) =
+    ItemBranchF (Just $ finaliseDeferredUnsafe part) :& finaliseDeferredUnsafe ps
+
+-- | This is to 'finaliseDeferredUnsafe' what 'finalizeSum' is to 'finalise'
+finaliseDeferredUnsafeSum
+    :: forall gs l ms. (LabelsKnown gs, gs ~ (SumSelection l : ms))
+    => ConfigRec 'Partial gs
+    -> ConfigRec 'Final gs
+finaliseDeferredUnsafeSum (item :& xs) = case item of
+    ItemOptionP (Just x) -> ItemOptionF x :& finaliseDeferredUnsafeBranches (Just x) xs
+    ItemOptionP Nothing -> error . toText $ "Undefined branch selection item: " <> itemOptionLabel item
+
+-- | This is to 'finaliseDeferredUnsafe' what 'finalizeBranches' is to 'finalise'
+finaliseDeferredUnsafeBranches
+    :: forall is. LabelsKnown is
+    => Maybe String
+    -> ConfigRec 'Partial is
+    -> ConfigRec 'Final is
+finaliseDeferredUnsafeBranches Nothing = \case
+    RNil -> RNil
+    (ItemBranchP _ :& xs) ->
+        ItemBranchF Nothing :& finaliseDeferredUnsafeBranches Nothing xs
+    _ -> error "non-branch item as sum-type"
+finaliseDeferredUnsafeBranches (Just sel) = \case
+    RNil -> error $ toText $ "Branch was not found: " <> sel
+    (item@(ItemBranchP rec) :& xs) -> if sel == itemBranchLabel item
+        then (ItemBranchF . Just $ finaliseDeferredUnsafe rec) :&
+             finaliseDeferredUnsafeBranches Nothing xs
+        else ItemBranchF Nothing :& finaliseDeferredUnsafeBranches (Just sel) xs
+    _ -> error "non-branch item as sum-type"
+    -- NOTE: as for 'finaliseBranches' this should never happen, but the type
+    -- system cannot prove it.
 
 -- | Fill values absent in one config with values from another config.
 -- Useful when total config of default values exists.
+-- NOTE: A Sum-Type selected branch cannot be swapped for another one using this 
 complement
     :: ConfigRec 'Partial is
     -> ConfigRec 'Final is
@@ -189,6 +353,10 @@ complement (ItemOptionP opt :& ps) (ItemOptionF sup :& fs)
     = ItemOptionF (fromMaybe sup opt) :& complement ps fs
 complement (ItemSub part :& ps) (ItemSub final :& fs)
     = ItemSub (complement part final) :& complement ps fs
+complement (ItemSumP (_ :& part) :& ps) (ItemSumF (f :& final) :& fs)
+    = ItemSumF (f :& complement part final) :& complement ps fs
+complement (ItemBranchP part :& ps) (ItemBranchF final :& fs)
+    = ItemBranchF (complement part <$> final) :& complement ps fs
 
 -- | Cast partial config to another partial config which is
 -- a superset of the former.
@@ -210,6 +378,8 @@ type family ItemType l is where
           )
       ItemType l ((l  ::: v)  ': _) = l ::: v
       ItemType l ((l  ::< us) ': _) = l ::< us
+      ItemType l ((l  ::+ us) ': _) = l ::+ us
+      ItemType l ((l  ::- us) ': _) = l ::- us
       ItemType l (_  ': is) = ItemType l is
 
 
@@ -242,6 +412,33 @@ sub :: forall k l us g is a. (Functor g, a ~ Item' k (l ::< us), HasSub l is us)
     -> g (ConfigRec k is)
 sub _ = rlens (Proxy :: Proxy (l ::< us)) . cfgItem
 
+-- | Check whether the configuration has the subsection.
+type HasSum l is us =
+    ( RecElem Rec (l ::+ us) is (RIndex (l ::+ us) is)
+    , ItemType l is ~ (l ::+ us)
+    )
+
+-- | Lens that focuses on the subsection option with the given label.
+tree :: forall k l us g is a. (Functor g, a ~ Item' k (l ::+ us), HasSum l is us)
+    => Label l
+    -> (a -> g a)
+    -> ConfigRec k is
+    -> g (ConfigRec k is)
+tree _ = rlens (Proxy :: Proxy (l ::+ us)) . cfgItem
+
+-- | Check whether the configuration has the subsection.
+type HasBranch l is us =
+    ( RecElem Rec (l ::- us) is (RIndex (l ::- us) is)
+    , ItemType l is ~ (l ::- us)
+    )
+
+-- | Lens that focuses on the subsection option with the given label.
+branch :: forall k l us g is a. (Functor g, a ~ Item' k (l ::- us), HasBranch l is us)
+    => Label l
+    -> (a -> g a)
+    -> ConfigRec k is
+    -> g (ConfigRec k is)
+branch _ = rlens (Proxy :: Proxy (l ::- us)) . cfgItem
 
 -----------------------
 -- Basic instances
@@ -260,17 +457,23 @@ instance
     )
     => Show (Item k i)
   where
-    show item@(ItemOptionP (Just x)) = itemOptionLabel item ++ " =: " ++ show x
-    show item@(ItemOptionP Nothing)  = itemOptionLabel item ++ " <unset>"
-    show item@(ItemOptionF x)        = itemOptionLabel item ++ " =: " ++ show x
-    show item@(ItemSub rec)          = itemSubLabel item    ++ " =< " ++ show rec
-
+    show item@(ItemOptionP (Just x))   = itemOptionLabel item ++ " =: " ++ show x
+    show item@(ItemOptionP Nothing)    = itemOptionLabel item ++ " <unset>"
+    show item@(ItemOptionF x)          = itemOptionLabel item ++ " =: " ++ show x
+    show item@(ItemSub rec)            = itemSubLabel item    ++ " =< " ++ show rec
+    show item@(ItemSumP rec)           = itemSumLabel item    ++ " =+ " ++ show rec
+    show item@(ItemSumF rec)           = itemSumLabel item    ++ " =+ " ++ show rec
+    show item@(ItemBranchP rec)        = itemBranchLabel item ++ " =- " ++ show rec
+    show item@(ItemBranchF (Just rec)) = itemBranchLabel item ++ " =- " ++ show rec
+    show item@(ItemBranchF Nothing)    = itemBranchLabel item ++ " <unselected>"
 
 instance
     ( SubRecsConstrained Semigroup 'Partial '[i]
     ) => Semigroup (Item 'Partial i) where
     ItemOptionP x1 <> ItemOptionP x2 = ItemOptionP . getLast $ Last x1 <> Last x2
     ItemSub r1 <> ItemSub r2 = ItemSub $ r1 <> r2
+    ItemSumP r1 <> ItemSumP r2 = ItemSumP $ r1 <> r2
+    ItemBranchP r1 <> ItemBranchP r2 = ItemBranchP $ r1 <> r2
 
 
 instance Monoid (Item 'Partial (l ::: t)) where
@@ -284,6 +487,23 @@ instance
   where
     mempty = ItemSub mempty
     mappend = (<>)
+
+instance
+    ( SubRecsConstrained Semigroup 'Partial '[l ::+ is]
+    , SubRecsConstrained Monoid 'Partial '[l ::+ is]
+    ) => Monoid (Item 'Partial (l ::+ is))
+  where
+    mempty = ItemSumP mempty
+    mappend = (<>)
+
+instance
+    ( SubRecsConstrained Semigroup 'Partial '[l ::- is]
+    , SubRecsConstrained Monoid 'Partial '[l ::- is]
+    ) => Monoid (Item 'Partial (l ::- is))
+  where
+    mempty = ItemBranchP mempty
+    mappend = (<>)
+
 
 instance Default (ConfigRec k '[]) where
     def = RNil
@@ -299,3 +519,15 @@ instance
     , Default (ConfigRec k is)
     ) => Default (ConfigRec k ((i ::< t) : is)) where
     def = ItemSub def :& def
+
+instance
+    ( Default (ConfigRec 'Partial is)
+    , Default (ConfigRec 'Partial (ToBranches t))
+    ) => Default (ConfigRec 'Partial ((i ::+ t) : is)) where
+    def = ItemSumP def :& def
+
+instance
+    ( Default (ConfigRec 'Partial t)
+    , Default (ConfigRec 'Partial is)
+    ) => Default (ConfigRec 'Partial ((i ::- t) : is)) where
+    def = ItemBranchP def :& def

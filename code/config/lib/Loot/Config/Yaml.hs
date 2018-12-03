@@ -5,6 +5,8 @@
 {-# LANGUAGE DataKinds      #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeOperators  #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MonoLocalBinds #-}
 
 -- | Utilities for reading configuration from a file.
 module Loot.Config.Yaml
@@ -16,8 +18,9 @@ import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault, to
 import Data.Vinyl (Rec ((:&), RNil))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 
-import Loot.Config.Record ((:::), (::<), ConfigKind (Partial), ConfigRec,
-                           Item (ItemOptionP, ItemSub), ItemKind)
+import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Partial),
+                           ConfigRec, Item (ItemOptionP, ItemSub, ItemSumP, ItemBranchP), 
+                           ItemKind, SumSelection, ToBranches)
 
 
 -- | This class is almost like 'FromJSON' but uses @aeson-better-errors@.
@@ -54,6 +57,33 @@ instance
         parseSub :: Parse e (ConfigRec 'Partial us)
         parseSub = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
 
+instance
+    forall l us is.
+        ( KnownSymbol l
+        , Monoid (ConfigRec 'Partial (SumSelection l : ToBranches us))
+        , OptionsFromJson (SumSelection l : ToBranches us)
+        , OptionsFromJson is
+        )
+    => OptionsFromJson ((l ::+ us) ': is)
+  where
+    configParser = (:&) <$> fmap ItemSumP parseSum <*> configParser
+      where
+        parseSum :: Parse e (ConfigRec 'Partial (SumSelection l : ToBranches us))
+        parseSum = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
+
+instance
+    forall l us is.
+        ( KnownSymbol l
+        , Monoid (ConfigRec 'Partial us)
+        , OptionsFromJson us
+        , OptionsFromJson is
+        )
+    => OptionsFromJson ((l ::- us) ': is)
+  where
+    configParser = (:&) <$> fmap ItemBranchP parseBranch <*> configParser
+      where
+        parseBranch :: Parse e (ConfigRec 'Partial us)
+        parseBranch = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
 
 instance OptionsFromJson is => FromJSON (ConfigRec 'Partial is) where
     parseJSON = toAesonParser' configParser
