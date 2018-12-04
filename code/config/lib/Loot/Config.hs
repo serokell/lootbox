@@ -21,7 +21,7 @@ import Loot.Config.CLI
 import Loot.Config.Lens
 import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Final, Partial),
                            ConfigRec, complement, finalise, finaliseDeferredUnsafe,
-                           option, sub, tree, upcast, branch)
+                           option, sub, tree, upcast, branch, selection)
 import Loot.Config.Yaml ()
 
 

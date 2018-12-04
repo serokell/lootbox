@@ -90,6 +90,15 @@ connection:
 ...
 ```
 
+To address this from your code you can also use the `selection` lens, that works for any `tree`. For instance these 2 lines are equivalent:
+
+```haskell
+...
+    & tree #connection . option #connectionType ?~ "branchA"
+    & tree #connection . selection ?~ "branchA"
+...
+```
+
 Please note that a `tree` will need all it's children to be `branch`es, so if you specify another item it will be converted, for instance in the example above we could have specified the "https" "connection" as
 
 ```haskell

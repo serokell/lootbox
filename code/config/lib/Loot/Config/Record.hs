@@ -50,6 +50,8 @@ module Loot.Config.Record
 
        , HasBranch
        , branch
+
+       , selection
        ) where
 
 import Data.Default (Default (..))
@@ -155,11 +157,11 @@ itemOptionLabel _ = symbolVal (Proxy :: Proxy l)
 itemSubLabel :: forall k l is. KnownSymbol l => Item k (l ::< is) -> String
 itemSubLabel _ = symbolVal (Proxy :: Proxy l)
 
--- | Internal helper used to get the name of a sum-type given the subsection.
+-- | Internal helper used to get the name of a sum-type given the sum-type.
 itemSumLabel :: forall k l is. KnownSymbol l => Item k (l ::+ is) -> String
 itemSumLabel _ = symbolVal (Proxy :: Proxy l)
 
--- | Internal helper used to get the name of a branch given the subsection.
+-- | Internal helper used to get the name of a branch given the branch.
 itemBranchLabel :: forall k l is. KnownSymbol l => Item k (l ::- is) -> String
 itemBranchLabel _ = symbolVal (Proxy :: Proxy l)
 
@@ -412,13 +414,13 @@ sub :: forall k l us g is a. (Functor g, a ~ Item' k (l ::< us), HasSub l is us)
     -> g (ConfigRec k is)
 sub _ = rlens (Proxy :: Proxy (l ::< us)) . cfgItem
 
--- | Check whether the configuration has the subsection.
+-- | Check whether the configuration has the sum-type.
 type HasSum l is us =
     ( RecElem Rec (l ::+ us) is (RIndex (l ::+ us) is)
     , ItemType l is ~ (l ::+ us)
     )
 
--- | Lens that focuses on the subsection option with the given label.
+-- | Lens that focuses on the sum-type option with the given label.
 tree :: forall k l us g is a. (Functor g, a ~ Item' k (l ::+ us), HasSum l is us)
     => Label l
     -> (a -> g a)
@@ -426,19 +428,33 @@ tree :: forall k l us g is a. (Functor g, a ~ Item' k (l ::+ us), HasSum l is us
     -> g (ConfigRec k is)
 tree _ = rlens (Proxy :: Proxy (l ::+ us)) . cfgItem
 
--- | Check whether the configuration has the subsection.
+-- | Check whether the configuration has the branch.
 type HasBranch l is us =
     ( RecElem Rec (l ::- us) is (RIndex (l ::- us) is)
     , ItemType l is ~ (l ::- us)
     )
 
--- | Lens that focuses on the subsection option with the given label.
+-- | Lens that focuses on the branch option with the given label.
 branch :: forall k l us g is a. (Functor g, a ~ Item' k (l ::- us), HasBranch l is us)
     => Label l
     -> (a -> g a)
     -> ConfigRec k is
     -> g (ConfigRec k is)
 branch _ = rlens (Proxy :: Proxy (l ::- us)) . cfgItem
+
+-- | Lens that focuses on the selection option of a sum-type
+selection
+    :: forall k l v g is a lp ms.
+        ( Functor g
+        , a ~ Item' k (l ::: v)
+        , HasOption l is v
+        , is ~ (SumSelection lp : ms)
+        , l ~ SumSelectionLabel lp
+        )
+    => (a -> g a)
+    -> ConfigRec k is
+    -> g (ConfigRec k is)
+selection = rlens (Proxy :: Proxy (l ::: v)) . cfgItem
 
 -----------------------
 -- Basic instances
