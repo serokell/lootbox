@@ -23,15 +23,17 @@ Server:
   replies and publications from listeners to the outer world.
 
 Client:
-* Has n DEALER backends to talk to servers and n PULL sockets to
+* Has n DEALER backends to talk to servers and n SUB sockets to
   receive updates. We store a map "ztNodeId -> peerResources", where
   resources are these two sockets.
 * It also has broker called "client broker" which connects a number
-  of client threads (that want to talk to network) to the broker
-  frontend (ROUTER). Broker gets messages from the frontend (worker requests)
-  and propagates them to backend, which sends them to the network.
-  Broker also gets messages from the PULL and propagates them to
-  a worker that "subscribed" to this kind of update.
+  of client threads (that want to talk to the network) to the broker
+  backends (DEALERs). Broker gets messages from the frontend (worker
+  requests through STM) and propagates them to backends (DEALERs),
+  which sends them to the network. Broker also gets messages from
+  the backends (DEALERs/SUBs) and propagates them to workers that
+  "subscribed" to this kind of update (SUB case) or can receive the
+  message of msgt (DEALER case).
 
 Tasklist
 ========
