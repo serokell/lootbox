@@ -2,11 +2,11 @@
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-{-# LANGUAGE DataKinds      #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE TypeOperators  #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE KindSignatures       #-}
+{-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE MonoLocalBinds       #-}
 
 -- | Utilities for reading configuration from a file.
 module Loot.Config.Yaml
@@ -52,10 +52,9 @@ instance
         )
     => OptionsFromJson ((l ::< us) ': is)
   where
-    configParser = (:&) <$> fmap ItemSub parseSub <*> configParser
-      where
-        parseSub :: Parse e (ConfigRec 'Partial us)
-        parseSub = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
+    configParser = (:&)
+        <$> fmap ItemSub (parseMulti (Proxy :: Proxy l))
+        <*> configParser
 
 instance
     forall l us is.
@@ -66,10 +65,9 @@ instance
         )
     => OptionsFromJson ((l ::+ us) ': is)
   where
-    configParser = (:&) <$> fmap ItemSumP parseSum <*> configParser
-      where
-        parseSum :: Parse e (ConfigRec 'Partial (SumSelection l : ToBranches us))
-        parseSum = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
+    configParser = (:&)
+        <$> fmap ItemSumP (parseMulti (Proxy :: Proxy l))
+        <*> configParser
 
 instance
     forall l us is.
@@ -80,10 +78,20 @@ instance
         )
     => OptionsFromJson ((l ::- us) ': is)
   where
-    configParser = (:&) <$> fmap ItemBranchP parseBranch <*> configParser
-      where
-        parseBranch :: Parse e (ConfigRec 'Partial us)
-        parseBranch = keyOrDefault (fromString $ symbolVal (Proxy :: Proxy l)) mempty configParser
+    configParser = (:&)
+        <$> fmap ItemBranchP (parseMulti (Proxy :: Proxy l))
+        <*> configParser
+
+-- | Internal function to parse multiple 'Item's
+parseMulti
+    :: forall l us e.
+        ( KnownSymbol l
+        , Monoid (ConfigRec 'Partial us)
+        , OptionsFromJson us
+        )
+    => Proxy l
+    -> Parse e (ConfigRec 'Partial us)
+parseMulti p = keyOrDefault (fromString $ symbolVal p) mempty configParser
 
 instance OptionsFromJson is => FromJSON (ConfigRec 'Partial is) where
     parseJSON = toAesonParser' configParser

@@ -149,21 +149,18 @@ cfgItem f (ItemSumF rec)    = ItemSumF <$> f rec
 cfgItem f (ItemBranchP rec) = ItemBranchP <$> f rec
 cfgItem f (ItemBranchF rec) = ItemBranchF <$> f rec
 
--- | Internal helper used to get the name of an option given the option.
-itemOptionLabel :: forall k l t. KnownSymbol l => Item k (l ::: t) -> String
-itemOptionLabel _ = symbolVal (Proxy :: Proxy l)
 
--- | Internal helper used to get the name of a subsection given the subsection.
-itemSubLabel :: forall k l is. KnownSymbol l => Item k (l ::< is) -> String
-itemSubLabel _ = symbolVal (Proxy :: Proxy l)
+-- | Type family to obtain a label from an 'ItemKind'
+type family ItemLabel (i :: ItemKind) where
+    ItemLabel (l ::: _) = l
+    ItemLabel (l ::< _) = l
+    ItemLabel (l ::+ _) = l
+    ItemLabel (l ::- _) = l
 
--- | Internal helper used to get the name of a sum-type given the sum-type.
-itemSumLabel :: forall k l is. KnownSymbol l => Item k (l ::+ is) -> String
-itemSumLabel _ = symbolVal (Proxy :: Proxy l)
+-- | Internal helper used to get the name of an item given the item.
+itemLabel :: forall k i. KnownSymbol (ItemLabel i) => Item k i -> String
+itemLabel _ = symbolVal (Proxy :: Proxy (ItemLabel i))
 
--- | Internal helper used to get the name of a branch given the branch.
-itemBranchLabel :: forall k l is. KnownSymbol l => Item k (l ::- is) -> String
-itemBranchLabel _ = symbolVal (Proxy :: Proxy l)
 
 -- | Require that all labels in the configuration are known.
 type family LabelsKnown is :: Constraint where
@@ -182,8 +179,8 @@ type family ValuesConstrained c is :: Constraint where
         ( ValuesConstrained c us
         , ValuesConstrained c is
         )
-    ValuesConstrained c ((l ::+ us) ': is) =
-        ( ValuesConstrained c (SumSelection l : ToBranches us)
+    ValuesConstrained c ((_ ::+ us) ': is) =
+        ( ValuesConstrained c (ToBranches us)
         , ValuesConstrained c is
         )
     ValuesConstrained c ((_ ::- us) ': is) =
@@ -204,15 +201,21 @@ type family SubRecsConstrained c k is :: Constraint where
         )
     SubRecsConstrained c k ((l ::+ us) ': is) =
         ( c (ConfigRec k (SumSelection l : ToBranches us))
-        , SubRecsConstrained c k (SumSelection l : ToBranches us)
+        , SubRecsConstrained c k (ToBranches us)
         , SubRecsConstrained c k is
         )
-    SubRecsConstrained c k ((_ ::- us) ': is) =
-        ( c (ConfigRec k us)
-        , c (Maybe (ConfigRec k us))
-        , SubRecsConstrained c k us
-        , SubRecsConstrained c k is
+    SubRecsConstrained c 'Partial ((_ ::- us) ': is) =
+        ( c (ConfigRec 'Partial us)
+        , SubRecsConstrained c 'Partial us
+        , SubRecsConstrained c 'Partial is
         )
+    SubRecsConstrained c 'Final ((_ ::- us) ': is) =
+        ( c (ConfigRec 'Final us)
+        , c (Maybe (ConfigRec 'Final us))
+        , SubRecsConstrained c 'Final us
+        , SubRecsConstrained c 'Final is
+        )
+
 
 -----------------------
 -- Finalisation
@@ -238,19 +241,19 @@ finalise = toEither . finalise' ""
       <*> finalise' prf xs
     finalise' prf (item@(ItemOptionP Nothing) :& xs)
         = (:&)
-      <$> Failure [prf <> itemOptionLabel item]
+      <$> Failure [prf <> itemLabel item]
       <*> finalise' prf xs
     finalise' prf (item@(ItemSub rec) :& xs)
         = (:&)
-      <$> (ItemSub <$> finalise' (prf <> itemSubLabel item <> ".") rec)
+      <$> (ItemSub <$> finalise' (prf <> itemLabel item <> ".") rec)
       <*> finalise' prf xs
     finalise' prf (item@(ItemSumP rec) :& xs)
         = (:&)
-      <$> (ItemSumF <$> finaliseSum (prf <> itemSumLabel item <> ".") rec)
+      <$> (ItemSumF <$> finaliseSum (prf <> itemLabel item <> ".") rec)
       <*> finalise' prf xs
     finalise' prf (item@(ItemBranchP rec) :& xs)
         = (:&)
-      <$> (ItemBranchF . Just <$> finalise' (prf <> itemBranchLabel item <> ".") rec)
+      <$> (ItemBranchF . Just <$> finalise' (prf <> itemLabel item <> ".") rec)
       <*> finalise' prf xs
 
     -- | This function traverses a sum-type configuration, it essentially uses
@@ -265,7 +268,7 @@ finalise = toEither . finalise' ""
             <$> Success (ItemOptionF x)
             <*> finaliseBranches prf (Just x) xs
         ItemOptionP Nothing -> (:&)
-            <$> Failure [prf <> itemOptionLabel item]
+            <$> Failure [prf <> itemLabel item]
             <*> finaliseBranches prf Nothing xs
 
     -- | This function traverses a series of branches, finalizing to 'Nothing'
@@ -284,9 +287,9 @@ finalise = toEither . finalise' ""
         _ -> Failure [prf]
     finaliseBranches prf (Just sel) = \case
         RNil -> Failure [prf <> sel]
-        (item@(ItemBranchP rec) :& xs) -> if sel == itemBranchLabel item
+        (item@(ItemBranchP rec) :& xs) -> if sel == itemLabel item
             then (:&)
-                <$> (ItemBranchF . Just <$> finalise' (prf <> itemBranchLabel item <> ".") rec)
+                <$> (ItemBranchF . Just <$> finalise' (prf <> itemLabel item <> ".") rec)
                 <*> finaliseBranches prf Nothing xs
             else (:&)
                 <$> Success (ItemBranchF Nothing)
@@ -303,7 +306,7 @@ finaliseDeferredUnsafe :: forall is. LabelsKnown is
                       => ConfigRec 'Partial is -> ConfigRec 'Final is
 finaliseDeferredUnsafe RNil = RNil
 finaliseDeferredUnsafe (item@(ItemOptionP opt) :& ps) =
-    let failureMsg = toText $ "Undefined config item: " <> itemOptionLabel item
+    let failureMsg = toText $ "Undefined config item: " <> itemLabel item
     in ItemOptionF (opt ?: error failureMsg) :& finaliseDeferredUnsafe ps
 finaliseDeferredUnsafe (ItemSub part :& ps) =
     ItemSub (finaliseDeferredUnsafe part) :& finaliseDeferredUnsafe ps
@@ -319,7 +322,7 @@ finaliseDeferredUnsafeSum
     -> ConfigRec 'Final gs
 finaliseDeferredUnsafeSum (item :& xs) = case item of
     ItemOptionP (Just x) -> ItemOptionF x :& finaliseDeferredUnsafeBranches (Just x) xs
-    ItemOptionP Nothing -> error . toText $ "Undefined branch selection item: " <> itemOptionLabel item
+    ItemOptionP Nothing -> error . toText $ "Undefined branch selection item: " <> itemLabel item
 
 -- | This is to 'finaliseDeferredUnsafe' what 'finalizeBranches' is to 'finalise'
 finaliseDeferredUnsafeBranches
@@ -334,7 +337,7 @@ finaliseDeferredUnsafeBranches Nothing = \case
     _ -> error "non-branch item as sum-type"
 finaliseDeferredUnsafeBranches (Just sel) = \case
     RNil -> error $ toText $ "Branch was not found: " <> sel
-    (item@(ItemBranchP rec) :& xs) -> if sel == itemBranchLabel item
+    (item@(ItemBranchP rec) :& xs) -> if sel == itemLabel item
         then (ItemBranchF . Just $ finaliseDeferredUnsafe rec) :&
              finaliseDeferredUnsafeBranches Nothing xs
         else ItemBranchF Nothing :& finaliseDeferredUnsafeBranches (Just sel) xs
@@ -442,7 +445,7 @@ branch :: forall k l us g is a. (Functor g, a ~ Item' k (l ::- us), HasBranch l 
     -> g (ConfigRec k is)
 branch _ = rlens (Proxy :: Proxy (l ::- us)) . cfgItem
 
--- | Lens that focuses on the selection option of a sum-type
+-- | Lens that focuses on the selection option of a tree/sum-type
 selection
     :: forall k l v g is a lp ms.
         ( Functor g
@@ -473,15 +476,15 @@ instance
     )
     => Show (Item k i)
   where
-    show item@(ItemOptionP (Just x))   = itemOptionLabel item ++ " =: " ++ show x
-    show item@(ItemOptionP Nothing)    = itemOptionLabel item ++ " <unset>"
-    show item@(ItemOptionF x)          = itemOptionLabel item ++ " =: " ++ show x
-    show item@(ItemSub rec)            = itemSubLabel item    ++ " =< " ++ show rec
-    show item@(ItemSumP rec)           = itemSumLabel item    ++ " =+ " ++ show rec
-    show item@(ItemSumF rec)           = itemSumLabel item    ++ " =+ " ++ show rec
-    show item@(ItemBranchP rec)        = itemBranchLabel item ++ " =- " ++ show rec
-    show item@(ItemBranchF (Just rec)) = itemBranchLabel item ++ " =- " ++ show rec
-    show item@(ItemBranchF Nothing)    = itemBranchLabel item ++ " <unselected>"
+    show item@(ItemOptionP (Just x))   = itemLabel item ++ " =: " ++ show x
+    show item@(ItemOptionP Nothing)    = itemLabel item ++ " <unset>"
+    show item@(ItemOptionF x)          = itemLabel item ++ " =: " ++ show x
+    show item@(ItemSub rec)            = itemLabel item ++ " =< " ++ show rec
+    show item@(ItemSumP rec)           = itemLabel item ++ " =+ " ++ show rec
+    show item@(ItemSumF rec)           = itemLabel item ++ " =+ " ++ show rec
+    show item@(ItemBranchP rec)        = itemLabel item ++ " =- " ++ show rec
+    show item@(ItemBranchF (Just rec)) = itemLabel item ++ " =- " ++ show rec
+    show item@(ItemBranchF Nothing)    = itemLabel item ++ " <unselected>"
 
 instance
     ( SubRecsConstrained Semigroup 'Partial '[i]
