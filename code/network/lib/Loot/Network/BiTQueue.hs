@@ -22,7 +22,7 @@ data BiTQueue r s = BiTQueue
       -- ^ Queue to receive messages from.
     , bSendQ    :: TQueue s
       -- ^ Queue to send messages to.
-    }
+    } deriving (Generic)
 
 -- | Creates an empty tqueue.
 newBtq :: MonadIO m => m (BiTQueue r s)

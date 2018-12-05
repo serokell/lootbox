@@ -7,38 +7,37 @@ Implementation
 
 Implementation follows ZMQ Guide (http://zguide.zeromq.org/page:all#toc111)
 and, in particular, some relevant patterns:
-* For direct communication: ROUTER to ROUTER. Instead of suggested
-  "nasty freelancer" pattern our nodes exchange do the handshake where
-  server communicates its identity to the client.
-* For subscriptions we use "Pub/Sub Message Envelopes". Messages are
-  three+ frames, first one is key, second is address, third+ is data.
+* For direct communication: DEALER / ROUTER.
+* For subscriptions: PUB / SUB.
+* For subscriptions we also use "Pub/Sub Message Envelopes". Messages
+  are two+ frames, first one is the key, second+ is data.
   http://zguide.zeromq.org/page:all#toc49
 * One-way (server to client) heartbeating using PUB/SUB, see the
   "heartbeating for paranoid pirate":
   http://zguide.zeromq.org/page:all#Heartbeating-for-Paranoid-Pirate
 
 Server:
-* Binds to two ports: ROUTER and PUSH
+* Binds to two ports: ROUTER and PUB.
 * Runs "server broker" in a main thread, which routes requests from
   frontend (ROUTER) to listeners. In other direction, it propagates
   replies and publications from listeners to the outer world.
 
 Client:
-* Has ROUTER backend to talk to servers and PULL to receive updates.
+* Has n DEALER backends to talk to servers and n SUB sockets to
+  receive updates. We store a map "ztNodeId -> peerResources", where
+  resources are these two sockets.
 * It also has broker called "client broker" which connects a number
-  of client threads (that want to talk to network) to the broker
-  frontend (ROUTER). Broker gets messages from the frontend (worker requests)
-  and propagates them to backend, which sends them to the network.
-  Broker also gets messages from the PULL and propagates them to
-  a worker that "subscribed" to this kind of update.
-* Every time we need to connect to some server, we open a DEALER socket,
-  ask server's ROUTER for his zmq identity, disconnect and destroy this
-  DEALER and use ROUTER <-> ROUTER communication.
+  of client threads (that want to talk to the network) to the broker
+  backends (DEALERs). Broker gets messages from the frontend (worker
+  requests through STM) and propagates them to backends (DEALERs),
+  which sends them to the network. Broker also gets messages from
+  the backends (DEALERs/SUBs) and propagates them to workers that
+  "subscribed" to this kind of update (SUB case) or can receive the
+  message of msgt (DEALER case).
 
 Tasklist
 ========
 
-  * Configurable parameters (polling periods etc).
   * Discovery.
   * Application-level load balancing.
   * Message limits.

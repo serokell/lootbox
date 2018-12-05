@@ -7,7 +7,7 @@ packages:
   - vinyl-0.8.1.1
 
   - git: https://github.com/int-index/caps
-    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671
+    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671 
 
   # for serialise
   - cborg-0.2.0.0

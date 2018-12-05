@@ -12,19 +12,15 @@ import Control.Concurrent (threadDelay, withMVar)
 import qualified Control.Concurrent.Async.Lifted as A
 import Control.Lens (makeLenses)
 import Data.Default (def)
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import Loot.Log.Internal (Name)
 import System.IO.Unsafe (unsafePerformIO)
-import qualified System.ZMQ4 as Z
 
 import Loot.Base.HasLens (HasLens (..))
-import Loot.Log.Internal (Logging (..), NameSelector (GivenName), Message(..))
+import Loot.Log.Internal (Logging (..), Message (..), NameSelector (GivenName))
 import Loot.Network.BiTQueue (recvBtq, sendBtq)
 import Loot.Network.Class
-import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ
-import Loot.Network.ZMQ.Adapter
 import qualified Loot.Network.ZMQ.Instance as I
 
 ----------------------------------------------------------------------------
@@ -62,7 +58,6 @@ instance NetworkingServ ZmqTcp (ReaderT BigState IO) where
     type CliId ZmqTcp = I.ZTCliId
     runServer = I.runServerDefault
     registerListener = I.registerListenerDefault
-
 
 ----------------------------------------------------------------------------
 -- Runners
@@ -164,33 +159,3 @@ testZmq = do
         node2
   where
     doUnlessM action = ifM action pass (doUnlessM action)
-
-----------------------------------------------------------------------------
--- Sanity checks
-----------------------------------------------------------------------------
-
-stupid :: IO ()
-stupid = do
-    let logFoo (Message l n t) = log $ "[" <> show l <> "] " <> show n <> ": " <> t
-    let logging = Logging logFoo (pure $ GivenName "stupid")
-    withZTGlobalEnv logging $ \ZTGlobalEnv{..} -> do
-      let addr = "tcp://127.0.0.1:8214"
-      let action1 = do
-              ztOurNodeId <- randomZTInternalId
-              pub <- Z.socket ztContext Z.Pub
-              Z.setIdentity (Z.restrict $ unZTInternalId ztOurNodeId) pub
-              Z.bind pub addr
-              forever $ do
-                  Z.sendMulti pub $
-                      NE.fromList $ [unSubscription heartbeatSubscription
-                                    ,unZTInternalId ztOurNodeId]
-                  threadDelay 300000
-      let action2 = do
-              threadDelay 300000
-              sub <- Z.socket ztContext Z.Sub
-              Z.connect sub addr
-              Z.subscribe sub (unSubscription heartbeatSubscription)
-              forever $
-                whileM (canReceive sub) $
-                  Z.receiveMulti sub >>= print
-      void $ A.concurrently_ action1 action2

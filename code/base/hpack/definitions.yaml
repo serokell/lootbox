@@ -26,11 +26,13 @@ _definitions:
         - FunctionalDependencies
         - GeneralizedNewtypeDeriving
         - LambdaCase
+        - MultiWayIf
         - MultiParamTypeClasses
         - NamedFieldPuns
         - OverloadedLabels
         - OverloadedStrings
         - RankNTypes
+        - RecordWildCards
         - ScopedTypeVariables
         - TemplateHaskell
         - TupleSections

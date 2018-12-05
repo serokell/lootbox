@@ -101,7 +101,7 @@ data UpdatePeersReq nId = UpdatePeersReq
 
 makeLenses ''UpdatePeersReq
 
-instance (Ord s) => Default (UpdatePeersReq s) where
+instance Default (UpdatePeersReq s) where
     def = UpdatePeersReq mempty mempty
 
 -- | Either a response from some server or a subscription update (key
