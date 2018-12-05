@@ -162,6 +162,22 @@ data ServBrokerStmRes
     | SBRequest InternalRequest
     deriving (Show)
 
+-- | We poll sockets in @runBroker@.
+-- There are three types of sockets:
+-- * ROUTER socket, frontend socket where all clients connect to
+-- * PAIR socket to handle internal requests to the broker
+-- * PAIR socket to handle replies from listeners
+data SocketType
+    = FrontendSocket
+    | ReqSocket
+    | ListenersSocket
+
+resolveSocketIndex :: Int -> SocketType
+resolveSocketIndex i
+    | i == 0 = FrontendSocket
+    | i == 1 = ReqSocket
+    | i == 2 = ListenersSocket
+    | otherwise = error "couldn't resolve polling socket index"
 
 runBroker :: (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m) => m ()
 runBroker = do
@@ -224,17 +240,16 @@ runBroker = do
 
               events <- Z.poll (-1) spdPolls
               forM_ (events `zip` [(0::Int)..]) $ \(e,i) ->
-                  unless (null e) $
-                      if | i == 0 ->
-                           whileM (canReceive ztServFront) $
-                           Z.receiveMulti ztServFront >>= frontToListener
-                         | i == 1 -> do
-                               req <- iqReceive ztServRequestQueue
-                               whenJust req processReq
-                         | i == 2 -> do
-                               req <- iqReceive ztListenersQueue
-                               whenJust req processMsg
-                         | otherwise -> error "server broker dispatcher exited"
+                  unless (null e) $ case resolveSocketIndex i of
+                      FrontendSocket ->
+                          whileM (canReceive ztServFront) $
+                              Z.receiveMulti ztServFront >>= frontToListener
+                      ReqSocket -> do
+                          req <- iqReceive ztServRequestQueue
+                          whenJust req processReq
+                      ListenersSocket -> do
+                          req <- iqReceive ztListenersQueue
+                          whenJust req processMsg
 
       forever $
           (forever action)

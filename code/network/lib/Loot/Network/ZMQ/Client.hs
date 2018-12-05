@@ -202,6 +202,31 @@ data CliPollData = CliPollData
     , cpdResolveMap :: !(HashMap Int (ZTNodeId, PeerResource))
     }
 
+-- | We poll sockets from @cpdPolls@.
+-- There are four types of sockets:
+-- * DEALER socket for each connected peer
+-- * SUB socket for each connected peer
+-- * PAIR socket to handle requests from client workers
+-- * PAIR socket to handle internal requests to the broker
+-- Each consructor corresponds to one of these types.
+data SocketType
+    = BackendSocket (ZTNodeId, Z.Socket Z.Dealer)
+    | SubSocket (ZTNodeId, Z.Socket Z.Sub)
+    | CliSocket
+    | ReqSocket
+
+resolveSocketIndex ::
+    Int -> CliPollData -> SocketType
+resolveSocketIndex i CliPollData{..}
+    | i < cpdN          = BackendSocket $ prBack <$> resolve i
+    | i < 2 * cpdN      = SubSocket $ prSub <$> resolve (i - cpdN)
+    | i == 2 * cpdN     = CliSocket
+    | i == 2 * cpdN + 1 = ReqSocket
+    | otherwise         = error "couldn't resolve polling socket index"
+  where
+    resolve ix =
+      fromMaybe (error $ "lookupUnsafe " <> show (ix,cpdN)) $
+      HMap.lookup ix cpdResolveMap
 
 recreateCliPollData ::
        PeersInfoVar -> CliRequestQueue -> ClientsQueue -> STM CliPollData
@@ -582,26 +607,19 @@ runBroker = do
 
     liftIO $ withWorkers $ do
       let action = do
-              CliPollData{..} <- atomically $ readTVar ztCliPollData
-
-              let resolve i =
-                      fromMaybe (error $ "lookupUnsafe " <> show (i,cpdN)) $
-                      HMap.lookup i cpdResolveMap
+              cpd@CliPollData{..} <- atomically $ readTVar ztCliPollData
 
               events <- Z.poll (-1) cpdPolls
               forM_ (events `zip` [0..]) $ \(e,i) ->
-                  unless (null e) $
-                      if | i < cpdN ->
-                           let (nId,res) = resolve i in receiveBack (prBack res) nId
-                         | i < 2 * cpdN ->
-                           let (nId,res) = resolve (i - cpdN) in receiveSub (prSub res) nId
-                         | i == 2 * cpdN -> do
-                               req <- iqReceive ztClientsQueue
-                               whenJust req $ uncurry clientToBackend
-                         | i == 2 * cpdN + 1 -> do
-                               req <- iqReceive ztCliRequestQueue
-                               whenJust req processReq
-                         | otherwise -> error "client broker dispatcher exited"
+                  unless (null e) $ case resolveSocketIndex i cpd of
+                      BackendSocket (peerId, backSock) -> receiveBack backSock peerId
+                      SubSocket (peerId, subSock)      -> receiveSub subSock peerId
+                      CliSocket -> do
+                          req <- iqReceive ztClientsQueue
+                          whenJust req $ uncurry clientToBackend
+                      ReqSocket -> do
+                          req <- iqReceive ztCliRequestQueue
+                          whenJust req processReq
 
       forever $
           (forever action)
