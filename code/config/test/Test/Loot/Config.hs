@@ -30,6 +30,7 @@ type Fields = '[ "str" ::: String
                , "int" ::: Int
                , "sub" ::< SubFields
                , "kek" ::: SomeKek
+               , SumTree
                ]
 
 type SubFields = '[ "int2" ::: Int
@@ -41,6 +42,22 @@ type Sub2Fields = '[ "str2" ::: String
                    , "mem"  ::: SomeMem
                    ]
 
+type SumTree = "tre" ::+ TreeFields
+
+type TreeFields = '[ "str3" ::: String
+                   , "brc1" ::- BranchFields
+                   , "brc2" ::- Branch2Fields
+                   ]
+
+type BranchFields = '[ "int3" ::: Int
+                     ]
+
+type Branch2Fields = '[ "str4" ::: String
+                      , "sub3" ::< Sub3Fields
+                      ]
+
+type Sub3Fields = '[ "int4" ::: Int ]
+
 cfg :: PartialConfig Fields
 cfg = mempty
 
@@ -48,7 +65,10 @@ cfg = mempty
 unit_emptyPartial :: Assertion
 unit_emptyPartial = do
     let s :: Text
-        s = "{str <unset>, int <unset>, sub =< {int2 <unset>, bool <unset>, sub2 =< {str2 <unset>, mem <unset>}}, kek <unset>}"
+        s = "{str <unset>, int <unset>, sub =< {int2 <unset>, bool <unset>, \
+            \sub2 =< {str2 <unset>, mem <unset>}}, kek <unset>, \
+            \tre =+ {treType <unset>, str3 <unset>, brc1 =- {int3 <unset>}, \
+            \brc2 =- {str4 <unset>, sub3 =< {int4 <unset>}}}}"
     s @=? show cfg
 
 
@@ -57,12 +77,27 @@ unit_lensesEmptyPartial = do
     cfg ^. option #str @=? Nothing
     cfg ^. option #int @=? Nothing
     cfg ^. sub #sub @=? (mempty :: PartialConfig SubFields)
+    cfg ^. option #kek @=? Nothing
+    cfg ^. tree #tre @=? (mempty :: PartialConfig '[SumTree]) ^. tree #tre
 
     cfg ^. sub #sub . option #int2 @=? Nothing
     cfg ^. sub #sub . option #bool @=? Nothing
     cfg ^. sub #sub . sub #sub2 @=? (mempty :: PartialConfig Sub2Fields)
 
     cfg ^. sub #sub . sub #sub2 . option #str2 @=? Nothing
+
+    cfg ^. tree #tre . option #treType @=? Nothing
+    cfg ^. tree #tre . selection @=? Nothing
+    cfg ^. tree #tre . option #str3 @=? Nothing
+    cfg ^. tree #tre . branch #brc1 @=? (mempty :: PartialConfig BranchFields)
+    cfg ^. tree #tre . branch #brc2 @=? (mempty :: PartialConfig Branch2Fields)
+
+    cfg ^. tree #tre . branch #brc1 . option #int3 @=? Nothing
+
+    cfg ^. tree #tre . branch #brc2 . option #str4 @=? Nothing
+    cfg ^. tree #tre . branch #brc2 . sub #sub3 @=? (mempty :: PartialConfig Sub3Fields)
+
+    cfg ^. tree #tre . branch #brc2 . sub #sub3 . option #int4 @=? Nothing
 
 hprop_lensOptionPartial :: Property
 hprop_lensOptionPartial = property $ do
@@ -89,6 +124,23 @@ hprop_lensSubOptionPartial = property $ do
     let cfg2 = cfg1 & sub #sub . sub #sub2 . option #str2 ?~ str
     cfg2 ^. sub #sub . option #int2 === Just int
     cfg2 ^. sub #sub . sub #sub2 . option #str2 === Just str
+
+hprop_lensTreeOptionPartial :: Property
+hprop_lensTreeOptionPartial = property $ do
+    str <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    let cfg1 = cfg & tree #tre . option #str3 ?~ str
+    cfg1 ^. tree #tre . option #str3 === Just str
+
+    int <- forAll $ Gen.int Range.constantBounded
+    let cfg2 = cfg1 & tree #tre . branch #brc1 . option #int3 ?~ int
+    cfg2 ^. tree #tre . option #str3 === Just str
+    cfg2 ^. tree #tre . branch #brc1 . option #int3 === Just int
+
+    str2 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    let cfg3 = cfg2 & tree #tre . branch #brc2 . option #str4 ?~ str2
+    cfg3 ^. tree #tre . branch #brc2 . option #str4 === Just str2
+    cfg3 ^. tree #tre . option #str3 === Just str
+    cfg3 ^. tree #tre . branch #brc1 . option #int3 === Just int
 
 
 hprop_mappendPartial :: Property
@@ -120,6 +172,25 @@ hprop_mappendPartial = property $ do
     cfg123 ^. option #int === Just int
     cfg123 ^. sub #sub . sub #sub2 . option #str2 === Just str3
 
+    str4 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    int2 <- forAll $ Gen.int Range.constantBounded
+    let cfg4 = cfg & tree #tre . option #str3 ?~ str4
+                   & tree #tre . branch #brc1 . option #int3 ?~ int2
+    cfg4 ^. tree #tre . option #str3 === Just str4
+    cfg4 ^. tree #tre . branch #brc1 . option #int3 === Just int2
+
+    str5 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    str6 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    let cfg5 = cfg & tree #tre . branch #brc2 . option #str4 ?~ str5
+                   & tree #tre . option #str3 ?~ str6
+
+    let cgf12345 = mconcat [cfg1, cfg2, cfg3, cfg4, cfg5]
+    cgf12345 ^. option #str === Just str2
+    cgf12345 ^. option #int === Just int
+    cgf12345 ^. sub #sub . sub #sub2 . option #str2 === Just str3
+    cgf12345 ^. tree #tre . option #str3 === Just str6
+    cgf12345 ^. tree #tre . branch #brc1 . option #int3 === Just int2
+    cgf12345 ^. tree #tre . branch #brc2 . option #str4 === Just str5
 
 -- | Helper for testing JSON decoding.
 testDecode :: String -> PartialConfig Fields -> Assertion
@@ -155,6 +226,27 @@ unit_parseJsonSubSub =
     testDecode "{ \"sub\": { \"sub2\": { \"str2\": \"hi\" } } }" $
         cfg & sub #sub . sub #sub2 . option #str2 ?~ "hi"
 
+unit_parseJsonTreeEmpty :: Assertion
+unit_parseJsonTreeEmpty =
+    testDecode "{ \"str\": \"hi\", \"tre\": {} }" $
+        cfg & option #str ?~ "hi"
+
+unit_parseJsonTree1 :: Assertion
+unit_parseJsonTree1 =
+    testDecode "{ \"tre\": { \"str3\": \"common\", \"brc1\": { \"int3\": 15 } } }" $
+        cfg & tree #tre . option #str3 ?~ "common"
+            & tree #tre . branch #brc1 . option #int3 ?~ 15
+
+unit_parseJsonTree2 :: Assertion
+unit_parseJsonTree2 =
+    testDecode "{ \"tre\": { \"brc2\": { \"sub3\": { \"int4\": 20 } } } }" $
+        cfg & tree #tre . branch #brc2 . sub #sub3 . option #int4 ?~ 20
+
+unit_parseJsonTree3 :: Assertion
+unit_parseJsonTree3 =
+    testDecode "{ \"tre\": { \"treType\": \"brc1\", \"brc1\": { \"int3\": 10 } } }" $
+        cfg & tree #tre . selection ?~ "brc1"
+            & tree #tre . branch #brc1 . option #int3 ?~ 10
 
 -----------------------
 -- Finalisation
@@ -170,6 +262,7 @@ unit_finaliseEmpty =
         , "sub.sub2.str2"
         , "sub.sub2.mem"
         , "kek"
+        , "tre.treType", "tre.str3"
         ]
 
 unit_finaliseSome :: Assertion
@@ -178,12 +271,15 @@ unit_finaliseSome = do
                    & sub #sub . option #bool ?~ False
                    & sub #sub . sub #sub2 . option #str2 ?~ ""
                    & option #kek ?~ (SomeKek 1)
+                   & tree #tre . selection ?~ "brc1"
     Left missing @=? finalise cfg1
   where
     missing =
         [ "int"
         , "sub.int2"
         , "sub.sub2.mem"
+        , "tre.str3"
+        , "tre.brc1.int3"
         ]
 
 fullConfig :: ConfigRec 'Partial Fields
@@ -195,6 +291,9 @@ fullConfig =
         & sub #sub . option #int2 ?~ 13579
         & sub #sub . sub #sub2 . option #str2 ?~ ""
         & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "bye")
+        & tree #tre . selection ?~ "brc1"
+        & tree #tre . option #str3 ?~ "lemon"
+        & tree #tre . branch #brc1 . option #int3 ?~ 54321
 
 unit_finalise :: Assertion
 unit_finalise = do
@@ -211,6 +310,12 @@ unit_finalise = do
             13579           @=? finalCfg ^. sub #sub . option #int2
             ""              @=? finalCfg ^. sub #sub . sub #sub2 . option #str2
             (SomeMem "bye") @=? finalCfg ^. sub #sub . sub #sub2 . option #mem
+            "brc1"          @=? finalCfg ^. tree #tre . selection
+            "lemon"         @=? finalCfg ^. tree #tre . option #str3
+            case finalCfg ^. tree #tre . branch #brc1 of
+                Nothing -> assertFailure "Valid config was not finalised properly"
+                Just brc ->
+                    54321   @=? brc ^. option #int3
 
             finalCfg ^. (lensOf @SomeKek) @=? (SomeKek 999)
             finalCfg ^. (lensOf @SomeMem) @=? (SomeMem "bye")
@@ -235,7 +340,20 @@ fieldsParser =
               (#str2 .:: (O.strOption $ long "str2") <*<
                #mem .:: (O.strOption $ long "mem"))
         ) <*<
-    #kek .:: (O.option auto $ long "kek")
+    #kek .:: (O.option auto $ long "kek") <*<
+    #tre .:+ 
+        (#treType .:: (O.strOption $ long "treType") <*<
+         #str3 .:: (O.strOption $ long "str3") <*<
+         #brc1 .:-
+            (#int3 .:: (O.option auto $ long "int3")
+            ) <*<
+         #brc2 .:-
+            (#str4 .:: (O.strOption $ long "str4") <*<
+             #sub3 .:<
+                (#int4 .:: (O.option auto $ long "int4")
+                )
+            )
+        )
 
 unit_cliOverrideEmptyId :: Assertion
 unit_cliOverrideEmptyId = do
@@ -250,6 +368,7 @@ someArgs =
     , "--mem", "hi"
     , "--bool"
     , "--kek", "SomeKek 777"
+    , "--int4", "12321"
     ]
 
 unit_cliOverrideSetNew :: Assertion
@@ -262,6 +381,7 @@ unit_cliOverrideSetNew = do
             & sub #sub . option #bool ?~ True
             & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "hi")
             & option #kek ?~ (SomeKek 777)
+            & tree #tre . branch #brc2 . sub #sub3 . option #int4 ?~ 12321
 
 unit_cliOverrideModExisting :: Assertion
 unit_cliOverrideModExisting = do
@@ -273,3 +393,4 @@ unit_cliOverrideModExisting = do
                    & sub #sub . option #bool ?~ True
                    & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "hi")
                    & option #kek ?~ (SomeKek 777)
+                   & tree #tre . branch #brc2 . sub #sub3 . option #int4 ?~ 12321

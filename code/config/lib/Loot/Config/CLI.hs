@@ -16,13 +16,16 @@ module Loot.Config.CLI
        , (.::)
        , (%::)
        , (.:<)
+       , (.:+)
+       , (.:-)
        ) where
 
 import Data.Vinyl (Label, type (<:), rreplace, rcast)
 import Lens.Micro (ASetter')
 import Options.Applicative (Parser, optional)
 
-import Loot.Config.Record (ConfigKind (Partial), ConfigRec, HasOption, HasSub, option, sub)
+import Loot.Config.Record (ConfigKind (Partial), ConfigRec, HasOption, HasSub,
+                           HasSum, HasBranch, SumSelection, option, sub, tree, branch)
 
 -- | Type for a parser which yields a modifier function instead of a
 -- value
@@ -115,6 +118,26 @@ infixr 6 %::
     -> OptModParser is
 l .:< p = (\uf cfg -> cfg & sub l %~ uf) <$> p
 infixr 6 .:<
+
+-- | Combinator which declares a config parser which parses one
+-- tree, leaving other options empty.
+(.:+)
+    :: forall l is us ms. (HasSum l is ms, us ~ (SumSelection l : ms))
+    => Label l
+    -> OptModParser us
+    -> OptModParser is
+l .:+ p = (\uf cfg -> cfg & tree l %~ uf) <$> p
+infixr 6 .:+
+
+-- | Combinator which declares a config parser which parses one
+-- branch, leaving other options empty.
+(.:-)
+    :: forall l is us. (HasBranch l is us)
+    => Label l
+    -> OptModParser us
+    -> OptModParser is
+l .:- p = (\uf cfg -> cfg & branch l %~ uf) <$> p
+infixr 6 .:-
 
 -- | Lifts the modifier of a subconfig to a modifier of larger config.
 uplift

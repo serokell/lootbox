@@ -31,7 +31,7 @@ type Options =
          ]
      , "connection" ::+
         '[ ftpAuth ::-
-           '[ userName ::: String 
+           '[ userName ::: String
             , password ::: String
             , doRetry ::: Bool
             ]
@@ -39,7 +39,8 @@ type Options =
            '[ doRetry ::: Bool
             ]
          , https ::-
-           '[ userName ::: String 
+           '[ userName ::: String
+            , password ::: String
             ]
          ]
      ]
@@ -99,21 +100,25 @@ To address this from your code you can also use the `selection` lens, that works
 ...
 ```
 
-Please note that a `tree` will need all it's children to be `branch`es, so if you specify another item it will be converted, for instance in the example above we could have specified the "https" "connection" as
+Please note that a `tree` `selection` only specifies what `branch` (`::-`) to use, so if you put non-`branch` items inside of a `tree` they will be treated as in every other place.
 
-```haskell
-...
-         , https ::: String
-...
-```
+You can use this, for instance, to factor out the options that are common to every `branch` of a `tree`. In the example above if you realize that also "ftpAnon" needs a "password", you could do:
 
-but that would have been the same as defining:
-
-```haskell
+```yaml
 ...
-         , https ::-
-           '[ https ::: String 
+     , "connection" ::+
+        '[ ftpAuth ::-
+           '[ userName ::: String
+            , doRetry ::: Bool
             ]
+         , ftpAnon ::-
+           '[ doRetry ::: Bool
+            ]
+         , https ::-
+           '[ userName ::: String
+            ]
+         , password ::: String
+         ]
 ...
 ```
 

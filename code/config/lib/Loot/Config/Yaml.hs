@@ -19,8 +19,8 @@ import Data.Vinyl (Rec ((:&), RNil))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 
 import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Partial),
-                           ConfigRec, Item (ItemOptionP, ItemSub, ItemSumP, ItemBranchP), 
-                           ItemKind, SumSelection, ToBranches)
+                           ConfigRec, Item (ItemOptionP, ItemSub, ItemSumP, ItemBranchP),
+                           ItemKind, SumSelection)
 
 
 -- | This class is almost like 'FromJSON' but uses @aeson-better-errors@.
@@ -59,8 +59,8 @@ instance
 instance
     forall l us is.
         ( KnownSymbol l
-        , Monoid (ConfigRec 'Partial (SumSelection l : ToBranches us))
-        , OptionsFromJson (SumSelection l : ToBranches us)
+        , Monoid (ConfigRec 'Partial (SumSelection l : us))
+        , OptionsFromJson (SumSelection l : us)
         , OptionsFromJson is
         )
     => OptionsFromJson ((l ::+ us) ': is)
