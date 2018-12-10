@@ -36,13 +36,16 @@ type family DoesntHaveType f is :: Constraint where
     DoesntHaveType f ((_ ::: f)  ': is) = TypeError ('Text "DoesntHaveType failed (item type not unique?)")
     DoesntHaveType f ((_ ::: _)  ': is) = DoesntHaveType f is
     DoesntHaveType f ((_ ::< us) ': is) = (DoesntHaveType f us, DoesntHaveType f is)
+    DoesntHaveType f ((_ ::+ us) ': is) = (DoesntHaveType f us, DoesntHaveType f is)
+    DoesntHaveType f ((_ ::- us) ': is) = (DoesntHaveType f us, DoesntHaveType f is)
 
 type family ItemTypeUnique (f :: Type) (is :: [ItemKind]) :: Constraint where
     ItemTypeUnique _ '[]       = ()
     ItemTypeUnique f ((_ ::: f) ': is) = DoesntHaveType f is
     ItemTypeUnique f ((_ ::: _) ': is) = ItemTypeUnique f is
     ItemTypeUnique f ((_ ::< us) ': is) = ItemTypeUnique f (us ++ is)
-
+    ItemTypeUnique f ((_ ::+ us) ': is) = ItemTypeUnique f (us ++ is)
+    ItemTypeUnique f ((_ ::- us) ': is) = ItemTypeUnique f (us ++ is)
 
 data SymPathElem = SOption Symbol | SSub Symbol
 
@@ -60,6 +63,12 @@ type family LabelOfType (f :: Type) labels cont (is :: [ItemKind]) :: [SymPathEl
         LabelOfType f labels cont is
 
     LabelOfType f labels cont ((l ::< us) ': is) =
+        LabelOfType f ('SSub l ': labels) (is ': cont) us
+
+    LabelOfType f labels cont ((l ::+ us) ': is) =
+        LabelOfType f ('SSub l ': labels) (is ': cont) us
+
+    LabelOfType f labels cont ((l ::- us) ': is) =
         LabelOfType f ('SSub l ': labels) (is ': cont) us
 
 type family LabelOfTypeS f is where
