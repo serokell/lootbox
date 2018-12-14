@@ -12,7 +12,7 @@ import Loot.Log.Actions
 import Loot.Log.Config (LogConfig (..), BackendConfig (..))
 import Loot.Log.Internal
 
-import Colog.Core.Action (LogAction(..), cfilter)
+import Colog.Core.Action (LogAction(..))
 import Control.Monad.Cont
 import Control.Monad.Reader (withReaderT)
 import Control.Monad.Trans.Control (MonadBaseControl)
@@ -30,7 +30,7 @@ withLogging config nameSel foll =
     withConfigAction config $ \logAction -> do
         let loggingImpl :: CapImpl Logging '[] m
             loggingImpl = CapImpl $ hoistLogging liftIO $
-                fromLogAction nameSel logAction
+                fromLogAction nameSel (minSeverity config) logAction
         withReaderT (addCap loggingImpl) $ do
             logDebug $ "Logging started, with config: "+||config||+""
             foll
@@ -41,14 +41,13 @@ withConfigAction
     => LogConfig
     -> (LogAction m Message -> n r) -> n r
 withConfigAction LogConfig {..} = runCont $ 
-    cfilter predicate <$> cont (withLogCombined $ map makeContAction backends)
+    cont (withLogCombined $ map makeContAction backends)
   where
     makeContAction = \case
         StdOut -> withLogMessageStdout
         StdErr -> withLogMessageStderr
         File path -> withLogMessageFile path
         Syslog syslogConfig -> withLogMessageSyslog syslogConfig
-    predicate msg = msgSeverity msg >= minSeverity
 
 -- | Combines multiple continuation-passing style 'LogAction's in one
 withLogCombined

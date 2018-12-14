@@ -7,7 +7,7 @@ import Loot.Log.Actions
 import Loot.Log.Config
 import Loot.Log.Internal
 
-import Colog.Core.Action (LogAction (..), cfilter)
+import Colog.Core.Action (LogAction (..))
 import Colog.Syslog (mkSyslogHandler, shClose)
 import Control.Monad.Component (ComponentM, buildComponent, buildComponent_)
 import Fmt ((+|), (|+))
@@ -20,10 +20,8 @@ allocateLogging
     -> NameSelector
     -> ComponentM (Logging m)
 allocateLogging LogConfig {..} nameSel = do
-    actionList <- zipWithM allocateBackend [1..] backends 
-    let predicate msg = msgSeverity msg >= minSeverity
-        logAction = cfilter predicate $ mconcat actionList
-    buildComponent_ "logging" . pure $ fromLogAction nameSel logAction
+    logAction <- mconcat <$> zipWithM allocateBackend [1..] backends
+    buildComponent_ "logging" . pure $ fromLogAction nameSel minSeverity logAction
 
 allocateBackend :: MonadIO m => Int -> BackendConfig -> ComponentM (LogAction m Message)
 allocateBackend n = \case

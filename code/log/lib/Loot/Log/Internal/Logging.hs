@@ -22,6 +22,15 @@ module Loot.Log.Internal.Logging
        , logAlert
        , logCritical
 
+       , whenDebugOn
+       , whenInfoOn
+       , whenNoticeOn
+       , whenWarningOn
+       , whenErrorOn
+       , whenEmergencyOn
+       , whenAlertOn
+       , whenCriticalOn
+
        , ModifyLogName (..)
        , WithLogging
        , modifyLogName
@@ -56,8 +65,9 @@ instance FromBuilder LogEvent where
 
 -- | Logging capability.
 data Logging m = Logging
-    { _log     :: Message -> m ()
-    , _logName :: m NameSelector
+    { _log            :: Message -> m ()
+    , _logName        :: m NameSelector
+    , _logMinSeverity :: m Severity
     }
 
 makeCap ''Logging
@@ -65,16 +75,20 @@ makeCap ''Logging
 toLogAction :: Logging m -> LogAction m Message
 toLogAction = LogAction . _log
 
-fromLogAction :: (Monad m) => NameSelector -> LogAction m Message -> Logging m
-fromLogAction nameSel logAction = Logging
-    { _log = unLogAction logAction
-    , _logName = return nameSel
+fromLogAction
+    :: (Monad m)
+    => NameSelector -> Severity -> LogAction m Message -> Logging m
+fromLogAction nameSel severity logAction = Logging
+    { _log            = unLogAction logAction
+    , _logName        = return nameSel
+    , _logMinSeverity = return severity
     }
 
 hoistLogging :: (forall a. m a -> n a) -> Logging m -> Logging n
 hoistLogging hst logging =
     logging { _log = \msg -> hst (_log logging msg)
             , _logName = hst (_logName logging)
+            , _logMinSeverity = hst (_logMinSeverity logging)
             }
 
 logNameSelL :: Functor m => ASetter' (Logging m) NameSelector
@@ -82,7 +96,7 @@ logNameSelL = sets $ \f l -> l{ _logName = fmap f (_logName l) }
 
 -- | Helper function for use 'logDebug' and family.
 logWith :: (Monad m, MonadLogging m) => Severity -> CallStack -> LogEvent -> m ()
-logWith msgSeverity cs ev = do
+logWith msgSeverity cs ev = whenSeverityOn msgSeverity $ do
     msgName <- selectLogName cs <$> logName
     let msgContent = getLogEvent ev
     log $ Message {..}
@@ -110,6 +124,36 @@ logAlert = logWith Alert callStack
 
 logCritical :: (HasCallStack, Monad m, MonadLogging m) => LogEvent -> m ()
 logCritical = logWith Critical callStack
+
+-- | Helper function to use 'whenDebugOn' and family.
+whenSeverityOn :: (Monad m, MonadLogging m) => Severity -> m () -> m ()
+whenSeverityOn severity action = do
+    minSeverity <- logMinSeverity
+    when (severity >= minSeverity) action
+
+whenDebugOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenDebugOn = whenSeverityOn Debug
+
+whenInfoOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenInfoOn = whenSeverityOn Info
+
+whenNoticeOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenNoticeOn = whenSeverityOn Notice
+
+whenWarningOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenWarningOn = whenSeverityOn Warning
+
+whenErrorOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenErrorOn = whenSeverityOn Error
+
+whenEmergencyOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenEmergencyOn = whenSeverityOn Emergency
+
+whenAlertOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenAlertOn = whenSeverityOn Alert
+
+whenCriticalOn :: (Monad m, MonadLogging m) => m () -> m ()
+whenCriticalOn = whenSeverityOn Critical
 
 -- | Allows to manipulate with logger name.
 class MonadLogging m => ModifyLogName m where

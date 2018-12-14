@@ -13,7 +13,7 @@ import qualified Control.Concurrent.Async.Lifted as A
 import Control.Lens (makeLenses)
 import Data.Default (def)
 import qualified Data.Set as Set
-import Loot.Log.Internal (Name)
+import Loot.Log.Internal (Name, Severity (Debug))
 import System.IO.Unsafe (unsafePerformIO)
 
 import Loot.Base.HasLens (HasLens (..))
@@ -72,7 +72,7 @@ log x = liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
 withZMQ :: Name -> ZTNodeId -> [ZTNodeId] -> Env () -> Env () -> IO ()
 withZMQ name nId peers server action = do
     let logFoo (Message l n t) = log $ "[" <> show l <> "] " <> show n <> ": " <> t
-    let logging = Logging logFoo (pure $ GivenName name)
+    let logging = Logging logFoo (pure $ GivenName name) (pure Debug)
     withZTGlobalEnv logging $ \ztEnv -> do
         cliEnv <- createNetCliEnv ztEnv def peers
         servEnv <- createNetServEnv ztEnv def nId
