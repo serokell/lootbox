@@ -20,6 +20,7 @@ import Loot.Base.HasLens (HasLens (..))
 import Loot.Log.Internal (Logging (..), Message (..), NameSelector (GivenName))
 import Loot.Network.BiTQueue (recvBtq, sendBtq)
 import Loot.Network.Class
+import Loot.Network.Utils
 import Loot.Network.ZMQ
 import qualified Loot.Network.ZMQ.Instance as I
 
@@ -67,20 +68,21 @@ lMVar :: MVar ()
 lMVar = unsafePerformIO $ newMVar ()
 
 log :: MonadIO m => Text -> m ()
-log x = liftIO $ withMVar lMVar $ \() -> putTextLn x >> pure ()
+log x = do
+    (TimeDurationMs t) <- liftIO getCurrentTimeMs
+    liftIO $ withMVar lMVar $ \() -> putTextLn (show t <> " " <> x) >> pure ()
 
 withZMQ :: Name -> ZTNodeId -> [ZTNodeId] -> Env () -> Env () -> IO ()
 withZMQ name nId peers server action = do
     let logFoo (Message l n t) = log $ "[" <> show l <> "] " <> show n <> ": " <> t
     let logging = Logging logFoo (pure $ GivenName name)
-    withZTGlobalEnv logging $ \ztEnv -> do
-        cliEnv <- createNetCliEnv ztEnv def peers
-        servEnv <- createNetServEnv ztEnv def nId
-        let execute = flip runReaderT (BigState cliEnv servEnv ztEnv) $
-                      void $ A.withAsync server $ const $
-                      void $ A.withAsync runClient $ const $
-                      action
-        execute `finally` (termNetCliEnv cliEnv >> termNetServEnv servEnv)
+    withZTGlobalEnv logging $ \ztEnv ->
+      withNetCliEnv ztEnv def peers $ \cliEnv ->
+      withNetServEnv ztEnv def nId $ \servEnv ->
+        flip runReaderT (BigState cliEnv servEnv ztEnv) $
+        A.concurrently_ runClient $
+        A.concurrently_ server $
+        action
 
 hang :: MonadIO m => m ()
 hang = liftIO $ threadDelay 1000000000
@@ -94,6 +96,24 @@ minTest = do
     void $ A.withAsync node1 $ const $ do
         threadDelay 1000000
         node2
+
+-- This experiment is to test whether resources are cleaned up properly
+testExit :: IO ()
+testExit = do
+    let n = ZTNodeId "127.0.0.1" 8001 8002
+    let logFoo (Message l x t) =
+            log $ "[" <> show l <> "] " <> show x <> ": " <> t
+    let logging = Logging logFoo (pure $ GivenName "n")
+    withZTGlobalEnv logging $ \ztEnv -> do
+      cliEnv <- createNetCliEnv ztEnv def []
+      servEnv <- createNetServEnv ztEnv def n
+      (log "started" >> hang) `finally`
+          (termNetServEnv servEnv >> termNetCliEnv cliEnv)
+
+testExit2 :: IO ()
+testExit2 =
+    withZMQ "n1" (ZTNodeId "127.0.0.1" 8001 8002) mempty runServer $
+        log "n1 started" >> hang
 
 testZmq :: IO ()
 testZmq = do
@@ -112,14 +132,12 @@ testZmq = do
                     atomically $
                         sendBtq biQ (Publish (Subscription "block") ["noblock: " <> show i])
             let servWithCancel = do
-                    s1 <- A.async $ runServer @ZmqTcp
-                    liftIO $ do
-                        threadDelay 10000000
+                    A.concurrently_ (runServer @ZmqTcp) $ do
+                        liftIO $ threadDelay 10000000
                         log "server: *killing*"
-                        A.cancel s1
-                        log "server: *killed, waiting*"
-                        threadDelay 10000000
-                        log "server: *restarting*"
+                    log "server: *killed, waiting*"
+                    liftIO $ threadDelay 10000000
+                    log "server: *restarting*"
                     runServer @ZmqTcp
             withZMQ "n1" n1 mempty servWithCancel $ do
                 log "server: *starting*"
@@ -154,7 +172,7 @@ testZmq = do
                             mempty
                             (Set.singleton (Subscription "block"))
                 void $ A.concurrently_ (runPinger biQ1) (runSubreader biQ2)
-    void $ A.withAsync node1 $ const $ do
+    void $ A.concurrently_ node1 $ do
         threadDelay 1000000
         node2
   where
