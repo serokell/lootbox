@@ -3,6 +3,7 @@
 module Loot.Network.ZMQ.InternalQueue
     ( InternalQueue (..)
     , newInternalQueue
+    , releaseInternalQueue
     , iqSend
     , iqReceive
     ) where
@@ -43,6 +44,12 @@ newInternalQueue ztContext = do
     iqTQueue <- newTQueueIO
 
     pure InternalQueue{..}
+
+-- | Releases the internal queue.
+releaseInternalQueue :: InternalQueue t -> IO ()
+releaseInternalQueue InternalQueue{..} = do
+    Z.close iqIn
+    Z.close iqOut
 
 -- | Sends message to the internal queue.
 iqSend :: InternalQueue t -> t -> IO ()

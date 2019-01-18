@@ -333,6 +333,9 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
     peersResources <- atomically $ HMap.elems <$> readTVar ztPeers
     forM_ peersResources releasePeerResource
 
+    releaseInternalQueue ztClientsQueue
+    releaseInternalQueue ztCliRequestQueue
+
 -- Connects/disconnects peers at request.
 changePeers :: MonadIO m => ZTGlobalEnv -> ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
 changePeers ZTGlobalEnv{..} ZTNetCliEnv{..} req = liftIO $ do

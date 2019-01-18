@@ -155,6 +155,8 @@ termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
 termNetServEnv ZTNetServEnv{..} = liftIO $ do
     Z.close ztServFront
     Z.close ztServPub
+    releaseInternalQueue ztListenersQueue
+    releaseInternalQueue ztServRequestQueue
 
 data ServBrokerStmRes
     = SBListener ListenerId ZTServSendMsg
