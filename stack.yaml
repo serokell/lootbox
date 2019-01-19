@@ -13,6 +13,9 @@ extra-deps:
   - co-log-core
   - co-log
 
+- git: https://github.com/serokell/zeromq-haskell
+  commit: 714ac20981b2d346609fd896a1af4d31eb6d1162
+
 - git: https://github.com/serokell/co-log-sys.git
   commit: a699c4eb00e413eb3cb2e9b34bfc7c1451b21279
 

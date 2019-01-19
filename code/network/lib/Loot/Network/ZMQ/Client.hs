@@ -7,6 +7,7 @@ module Loot.Network.ZMQ.Client
     , ZTNetCliEnv (..)
     , createNetCliEnv
     , termNetCliEnv
+    , withNetCliEnv
     , ZTClientEnv
     , CliRequestQueue
     , ZTUpdatePeersReq
@@ -20,6 +21,7 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async as A
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
+import qualified Control.Exception.Safe as E
 import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
 import Control.Monad.STM (retry)
@@ -300,9 +302,10 @@ data ZTNetCliEnv = ZTNetCliEnv
 
     , ztCliLogging      :: !(Logging IO)
       -- ^ Logging function from global context.
-
     , ztCliSettings     :: !ZTCliSettings
       -- ^ Client settings.
+    , ztCliTerminated   :: !(MVar ())
+      -- ^ Broker running flag, empty if broker is running.
     }
 
 -- | Creates client environment.
@@ -316,6 +319,7 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- newInternalQueue ztContext
     ztCliPollData <- newTVarIO $ CliPollData mempty 0 mempty
+    ztCliTerminated <- liftIO $ newMVar ()
 
     let modGivenName (GivenName x) = GivenName $ x <> "cli"
         modGivenName x             = x
@@ -329,6 +333,9 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
 -- | Terminates client environment.
 termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
 termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
+    -- Wait until broker exits.
+    () <- takeMVar ztCliTerminated
+
     -- Free the dealer sockets/adapters for peers we're currently
     -- connecting to.
     peersResources <- atomically $ HMap.elems <$> readTVar ztPeers
@@ -336,6 +343,16 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
 
     releaseInternalQueue ztClientsQueue
     releaseInternalQueue ztCliRequestQueue
+
+withNetCliEnv ::
+       (MonadIO m, MonadMask m)
+    => ZTGlobalEnv
+    -> ZTCliSettings
+    -> [ZTNodeId]
+    -> (ZTNetCliEnv -> m a)
+    -> m a
+withNetCliEnv global settings peers action =
+    bracket (createNetCliEnv global settings peers) termNetCliEnv action
 
 -- Connects/disconnects peers at request.
 changePeers :: MonadIO m => ZTGlobalEnv -> ZTNetCliEnv -> ZTUpdatePeersReq -> m ()
@@ -609,27 +626,33 @@ runBroker = do
              A.withAsync (clientsToBrokerWorker cEnv) $ const $
              action
 
-    liftIO $ withWorkers $ do
-      let action = do
-              cpd@CliPollData{..} <- atomically $ readTVar ztCliPollData
-              events <- Z.poll (-1) cpdPolls
-              forM_ (events `zip` [0..]) $ \(e,i) ->
-                  unless (null e) $ case resolveSocketIndex i cpd of
-                      BackendSocket (peerId, backSock) -> receiveBack backSock peerId
-                      SubSocket (peerId, subSock)      -> receiveSub subSock peerId
-                      CliSocket -> do
-                          req <- iqReceive ztClientsQueue
-                          whenJust req $ uncurry clientToBackend
-                      ReqSocket -> do
-                          req <- iqReceive ztCliRequestQueue
-                          whenJust req processReq
+    let pollAndProcess = do
+            cpd@CliPollData{..} <- atomically $ readTVar ztCliPollData
+            events <- Z.poll (-1) cpdPolls
+            forM_ (events `zip` [0..]) $ \(e,i) ->
+                unless (null e) $ case resolveSocketIndex i cpd of
+                    BackendSocket (peerId, backSock) -> receiveBack backSock peerId
+                    SubSocket (peerId, subSock)      -> receiveSub subSock peerId
+                    CliSocket -> do
+                        req <- iqReceive ztClientsQueue
+                        whenJust req $ uncurry clientToBackend
+                    ReqSocket -> do
+                        req <- iqReceive ztCliRequestQueue
+                        whenJust req processReq
 
-      forever $
-          (forever action)
-          `catchAny`
-          (\e -> do ztCliLog Error $
-                        "Client broker exited, restarting in 2s: " <> show e
-                    threadDelay 2000000)
+    let runAll = do
+            x <- tryTakeMVar ztCliTerminated
+            whenNothing x $
+                error $ "Couldn't start client broker: " <>
+                        "it's either already running, or not initialised"
+            withWorkers $ forever $
+                (forever pollAndProcess)
+                `catchAny`
+                (\e -> do ztCliLog Error $
+                              "Client broker exited, restarting in 2s: " <> show e
+                          threadDelay 2000000)
+
+    liftIO $ runAll `finally` (tryPutMVar ztCliTerminated ())
 
 ----------------------------------------------------------------------------
 -- Methods

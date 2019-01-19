@@ -7,11 +7,12 @@ module Loot.Network.ZMQ.Server
        ( ZTServSettings (..)
        , ZTNetServEnv
        , createNetServEnv
+       , termNetServEnv
+       , withNetServEnv
 
        , ZTListenerEnv
        , ServRequestQueue
        , ZTCliId (..)
-       , termNetServEnv
        , runBroker
        , registerListener
        ) where
@@ -124,6 +125,8 @@ data ZTNetServEnv = ZTNetServEnv
 
     , ztServSettings     :: !ZTServSettings
       -- ^ Server settings.
+    , ztServTerminated   :: !(MVar ())
+      -- ^ Broker running flag, empty if broker is running.
     }
 
 -- | Creates server environment. Accepts only the host/ports to bind
@@ -140,6 +143,7 @@ createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
     ztListenersQueue <- newInternalQueue ztContext
     ztMsgTypes <- newTVarIO mempty
     ztServRequestQueue <- newInternalQueue ztContext
+    ztServTerminated <- liftIO $ newMVar ()
 
     let modGivenName (GivenName x) = GivenName $ x <> "serv"
         modGivenName x             = x
@@ -154,10 +158,23 @@ createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
 -- | Terminates server environment.
 termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
 termNetServEnv ZTNetServEnv{..} = liftIO $ do
+    -- Wait for the broker to exit
+    () <- takeMVar ztServTerminated
+
     Z.close ztServFront
     Z.close ztServPub
     releaseInternalQueue ztListenersQueue
     releaseInternalQueue ztServRequestQueue
+
+withNetServEnv ::
+       (MonadIO m, MonadMask m)
+    => ZTGlobalEnv
+    -> ZTServSettings
+    -> ZTNodeId
+    -> (ZTNetServEnv -> m a)
+    -> m a
+withNetServEnv global settings nId action =
+    bracket (createNetServEnv global settings nId) termNetServEnv action
 
 data ServBrokerStmRes
     = SBListener ListenerId ZTServSendMsg
@@ -230,36 +247,47 @@ runBroker = do
                 (fromIntegral $ zsHeartbeatsInterval ztServSettings) * 1000
             iqSend ztServRequestQueue IRHeartBeat
 
-    liftIO $ A.withAsync hbWorker $ const $
-             A.withAsync (listenersToBrokerWorker sEnv) $ const $ do
 
-      let action = liftIO $ do
-              let toPoll sock = Z.Sock sock [Z.In] Nothing
-              let spdPolls =
-                      [ toPoll ztServFront
-                      , toPoll (iqOut ztServRequestQueue)
-                      , toPoll (iqOut ztListenersQueue)
-                      ]
+    let pollAndProcess = liftIO $ do
+            let toPoll sock = Z.Sock sock [Z.In] Nothing
+            let spdPolls =
+                    [ toPoll ztServFront
+                    , toPoll (iqOut ztServRequestQueue)
+                    , toPoll (iqOut ztListenersQueue)
+                    ]
 
-              events <- Z.poll (-1) spdPolls
-              forM_ (events `zip` [(0::Int)..]) $ \(e,i) ->
-                  unless (null e) $ case resolveSocketIndex i of
-                      FrontendSocket ->
-                          whileM (canReceive ztServFront) $
-                              Z.receiveMulti ztServFront >>= frontToListener
-                      ReqSocket -> do
-                          req <- iqReceive ztServRequestQueue
-                          whenJust req processReq
-                      ListenersSocket -> do
-                          req <- iqReceive ztListenersQueue
-                          whenJust req processMsg
+            events <- Z.poll (-1) spdPolls
 
-      forever $
-          (forever action)
-          `catchAny`
-          (\e -> do ztLog ztServLogging Error $
-                        "Server broker exited, restarting in 2s: " <> show e
-                    threadDelay 2000000)
+            forM_ (events `zip` [(0::Int)..]) $ \(e,i) ->
+                unless (null e) $ case resolveSocketIndex i of
+                    FrontendSocket ->
+                        whileM (canReceive ztServFront) $
+                            Z.receiveMulti ztServFront >>= frontToListener
+                    ReqSocket -> do
+                        req <- iqReceive ztServRequestQueue
+                        whenJust req processReq
+                    ListenersSocket -> do
+                        req <- iqReceive ztListenersQueue
+                        whenJust req processMsg
+
+    let withWorkers action =
+            A.withAsync hbWorker $ const $
+            A.withAsync (listenersToBrokerWorker sEnv) $ const $
+            action
+
+    let runAll = do
+            x <- tryTakeMVar ztServTerminated
+            whenNothing x $
+                error $ "Couldn't start server broker: " <>
+                        "it's either already running, or not initialised"
+            withWorkers $ forever $
+                (forever pollAndProcess)
+                `catchAny`
+                (\e -> do ztLog ztServLogging Error $
+                              "Server broker exited, restarting in 2s: " <> show e
+                          threadDelay 2000000)
+
+    liftIO $ runAll `finally` (tryPutMVar ztServTerminated ())
 
 registerListener ::
        (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m)
