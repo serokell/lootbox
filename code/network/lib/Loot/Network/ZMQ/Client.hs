@@ -40,6 +40,7 @@ import Loot.Log.Internal (Logging (..), NameSelector (..), Severity (..), logNam
 import Loot.Network.Class hiding (NetworkingCli (..), NetworkingServ (..))
 import Loot.Network.Utils (TimeDurationMs (..), getCurrentTimeMs, whileM)
 import Loot.Network.ZMQ.Common
+import Loot.Network.ZMQ.Internal
 import Loot.Network.ZMQ.InternalQueue
 
 ----------------------------------------------------------------------------
@@ -611,7 +612,6 @@ runBroker = do
     liftIO $ withWorkers $ do
       let action = do
               cpd@CliPollData{..} <- atomically $ readTVar ztCliPollData
-
               events <- Z.poll (-1) cpdPolls
               forM_ (events `zip` [0..]) $ \(e,i) ->
                   unless (null e) $ case resolveSocketIndex i cpd of

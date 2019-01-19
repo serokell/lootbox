@@ -36,6 +36,7 @@ import Loot.Network.BiTQueue (newBtq)
 import Loot.Network.Class hiding (registerListener)
 import Loot.Network.Utils (whileM)
 import Loot.Network.ZMQ.Common
+import Loot.Network.ZMQ.Internal
 import Loot.Network.ZMQ.InternalQueue
 
 ----------------------------------------------------------------------------
