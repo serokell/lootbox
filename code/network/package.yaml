@@ -17,6 +17,7 @@ library:
     - loot-base
     - loot-log
     - mtl
+    - safe-exceptions
     - serialise
     - singletons
     - stm

@@ -4,12 +4,9 @@
 
 module Loot.Network.ZMQ.Common
     (
-      -- | Misc
+      -- | Common functions
       ZmqTcp
-    , ztLog
     , endpointTcp
-    , canReceive
-    , atLeastOne
 
       -- | Node identities
     , ZTNodeId(..)
@@ -22,22 +19,15 @@ module Loot.Network.ZMQ.Common
     , ztGlobalEnv
     , ztGlobalEnvRelease
     , withZTGlobalEnv
-
-      -- | Internal messages
-    , heartbeatSubscription
     ) where
 
 import Prelude hiding (log)
 
 import Codec.Serialise (Serialise)
-import Control.Monad.STM (retry)
 import qualified Data.List as L
-import qualified Data.List.NonEmpty as NE
-import GHC.Stack (HasCallStack, callStack)
 import qualified System.ZMQ4 as Z
 
-import Loot.Log.Internal (Logging (..), Message (..), Severity, selectLogName)
-import Loot.Network.Class (Subscription (..))
+import Loot.Log.Internal (Logging (..))
 
 ----------------------------------------------------------------------------
 -- Common functions
@@ -46,30 +36,9 @@ import Loot.Network.Class (Subscription (..))
 -- | Networking tag type for ZMQ over TCP.
 data ZmqTcp
 
--- | Logging function for zmq -- doesn't require any monad, uses
--- 'Logging IO' directly.
-ztLog :: HasCallStack => Logging IO -> Severity -> Text -> IO ()
-ztLog Logging{..} msgSeverity msgContent = do
-    msgName <- selectLogName callStack <$> _logName
-    _log $ Message {..}
-
 -- | Generic tcp address creation helper.
 endpointTcp :: String -> Integer -> String
 endpointTcp h p = "tcp://" <> h <> ":" <> show p
-
--- | Checks if data can be received from the socket. Use @whileM
--- canReceive process@ pattern after the STM action on the needed
--- socket.
-canReceive :: Z.Socket t -> IO Bool
-canReceive sock = elem Z.In <$> Z.events sock
-
--- | Given a set of STM actions, returns all that succeed if at least
--- one does.
-atLeastOne :: NonEmpty (STM (Maybe a)) -> STM (NonEmpty a)
-atLeastOne l = fmap catMaybes (sequence (NE.toList l)) >>= \case
-    [] -> retry
-    x:xs -> pure $ x :| xs
-
 
 ----------------------------------------------------------------------------
 -- Node identifiers
@@ -136,11 +105,3 @@ withZTGlobalEnv ::
     -> m a
 withZTGlobalEnv logFunc action =
     bracket (ztGlobalEnv logFunc) ztGlobalEnvRelease action
-
-----------------------------------------------------------------------------
--- Internal messages and commands
-----------------------------------------------------------------------------
-
--- | Key for the heartbeat subscription.
-heartbeatSubscription :: Subscription
-heartbeatSubscription = Subscription "_hb"
