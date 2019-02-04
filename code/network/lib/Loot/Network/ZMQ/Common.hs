@@ -27,7 +27,8 @@ import Codec.Serialise (Serialise)
 import qualified Data.List as L
 import qualified System.ZMQ4 as Z
 
-import Loot.Log.Internal (Logging (..))
+import Loot.Log.Internal (Logging (..), Severity (..))
+import Loot.Network.ZMQ.Internal (ztLog)
 
 ----------------------------------------------------------------------------
 -- Common functions
@@ -95,7 +96,10 @@ ztGlobalEnv ztLogging = do
 
 -- | Release 'ZTGlobalEnv'.
 ztGlobalEnvRelease :: MonadIO m => ZTGlobalEnv -> m ()
-ztGlobalEnvRelease = liftIO . Z.term . ztContext
+ztGlobalEnvRelease ZTGlobalEnv{..} = liftIO $ do
+    ztLog ztLogging Debug "Terminating global env"
+    Z.term ztContext
+    ztLog ztLogging Debug "Terminating global env done"
 
 -- | Bracket for 'ZTGlobalEnv'
 withZTGlobalEnv ::

@@ -21,7 +21,6 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async as A
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
-import qualified Control.Exception.Safe as E
 import Control.Lens (at, makeLenses, (-~))
 import Control.Monad.Except (runExceptT, throwError)
 import Control.Monad.STM (retry)
@@ -304,8 +303,6 @@ data ZTNetCliEnv = ZTNetCliEnv
       -- ^ Logging function from global context.
     , ztCliSettings     :: !ZTCliSettings
       -- ^ Client settings.
-    , ztCliTerminated   :: !(MVar ())
-      -- ^ Broker running flag, empty if broker is running.
     }
 
 -- | Creates client environment.
@@ -319,7 +316,6 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
     ztMsgTypes <- newTVarIO mempty
     ztCliRequestQueue <- newInternalQueue ztContext
     ztCliPollData <- newTVarIO $ CliPollData mempty 0 mempty
-    ztCliTerminated <- liftIO $ newMVar ()
 
     let modGivenName (GivenName x) = GivenName $ x <> "cli"
         modGivenName x             = x
@@ -333,8 +329,7 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
 -- | Terminates client environment.
 termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
 termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
-    -- Wait until broker exits.
-    () <- takeMVar ztCliTerminated
+    ztLog ztCliLogging Error "Terminating client env"
 
     -- Free the dealer sockets/adapters for peers we're currently
     -- connecting to.
@@ -343,6 +338,7 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
 
     releaseInternalQueue ztClientsQueue
     releaseInternalQueue ztCliRequestQueue
+    ztLog ztCliLogging Error "Terminating client env done"
 
 withNetCliEnv ::
        (MonadIO m, MonadMask m)
@@ -622,8 +618,12 @@ runBroker = do
 
     -- Runner
     let withWorkers action =
-             A.withAsync (heartbeatWorker ztCliSettings ztHeartbeatInfo ztCliRequestQueue) $ const $
-             A.withAsync (clientsToBrokerWorker cEnv) $ const $
+             A.concurrently_
+             (heartbeatWorker ztCliSettings ztHeartbeatInfo ztCliRequestQueue
+              `finally` ztCliLog Debug "Heartbeating worker exited") $
+             A.concurrently_
+             (clientsToBrokerWorker cEnv
+              `finally` ztCliLog Debug "Clients to broker worker exited") $
              action
 
     let pollAndProcess = do
@@ -641,10 +641,6 @@ runBroker = do
                         whenJust req processReq
 
     let runAll = do
-            x <- tryTakeMVar ztCliTerminated
-            whenNothing x $
-                error $ "Couldn't start client broker: " <>
-                        "it's either already running, or not initialised"
             withWorkers $ forever $
                 (forever pollAndProcess)
                 `catchAny`
@@ -652,7 +648,7 @@ runBroker = do
                               "Client broker exited, restarting in 2s: " <> show e
                           threadDelay 2000000)
 
-    liftIO $ runAll `finally` (tryPutMVar ztCliTerminated ())
+    liftIO $ runAll `finally` ztCliLog Debug "Client broker exited"
 
 ----------------------------------------------------------------------------
 -- Methods
