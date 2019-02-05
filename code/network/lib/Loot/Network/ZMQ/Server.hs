@@ -125,8 +125,6 @@ data ZTNetServEnv = ZTNetServEnv
 
     , ztServSettings     :: !ZTServSettings
       -- ^ Server settings.
-    , ztServTerminated   :: !(MVar ())
-      -- ^ Broker running flag, empty if broker is running.
     }
 
 -- | Creates server environment. Accepts only the host/ports to bind
@@ -143,7 +141,6 @@ createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
     ztListenersQueue <- newInternalQueue ztContext
     ztMsgTypes <- newTVarIO mempty
     ztServRequestQueue <- newInternalQueue ztContext
-    ztServTerminated <- liftIO $ newMVar ()
 
     let modGivenName (GivenName x) = GivenName $ x <> "serv"
         modGivenName x             = x
@@ -158,13 +155,13 @@ createNetServEnv ZTGlobalEnv{..} ztServSettings ztBindOn0 = liftIO $ do
 -- | Terminates server environment.
 termNetServEnv :: MonadIO m => ZTNetServEnv -> m ()
 termNetServEnv ZTNetServEnv{..} = liftIO $ do
-    -- Wait for the broker to exit
-    () <- takeMVar ztServTerminated
+    ztLog ztServLogging Debug "Terminating server env"
 
     Z.close ztServFront
     Z.close ztServPub
     releaseInternalQueue ztListenersQueue
     releaseInternalQueue ztServRequestQueue
+    ztLog ztServLogging Debug "Terminating server env done"
 
 withNetServEnv ::
        (MonadIO m, MonadMask m)
@@ -271,15 +268,15 @@ runBroker = do
                         whenJust req processMsg
 
     let withWorkers action =
-            A.withAsync hbWorker $ const $
-            A.withAsync (listenersToBrokerWorker sEnv) $ const $
+            A.concurrently_
+            (hbWorker
+             `finally` ztLog ztServLogging Debug "Heartbeating worker exited") $
+            A.concurrently_
+            (listenersToBrokerWorker sEnv
+             `finally` ztLog ztServLogging Debug "Listeners to broker worker exited") $
             action
 
-    let runAll = do
-            x <- tryTakeMVar ztServTerminated
-            whenNothing x $
-                error $ "Couldn't start server broker: " <>
-                        "it's either already running, or not initialised"
+    let runAll =
             withWorkers $ forever $
                 (forever pollAndProcess)
                 `catchAny`
@@ -287,7 +284,7 @@ runBroker = do
                               "Server broker exited, restarting in 2s: " <> show e
                           threadDelay 2000000)
 
-    liftIO $ runAll `finally` (tryPutMVar ztServTerminated ())
+    liftIO $ runAll `finally` ztLog ztServLogging Debug "Server broker exited"
 
 registerListener ::
        (MonadReader r m, HasLens' r ZTNetServEnv, MonadIO m)
