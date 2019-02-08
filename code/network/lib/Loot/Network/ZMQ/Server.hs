@@ -78,12 +78,15 @@ listenersToBrokerWorker ZTNetServEnv { ztListeners, ztListenersQueue, ztServLogg
       forever $ (forever action) `catchAny` handler
   where
     action = do
+        putTextLn "listenersToBrokerWorker working"
         (results :: NE.NonEmpty ZTServSendMsg) <-
            atomically $ do
             (listenerEnvs :: [ZTListenerEnv]) <- Map.elems <$> readTVar ztListeners
             when (null listenerEnvs) retry
             atLeastOne $ map (TQ.tryReadTQueue . bSendQ) $ NE.fromList listenerEnvs
+        putTextLn $ "incoming: " <> show (length results)
         forM_ results (iqSend ztListenersQueue)
+        putTextLn $ "processed incoming"
     handler e = do
         ztLog ztServLogging Error $
             "listenersToBroker worker exited, restarting in 2s: " <> show e
@@ -272,7 +275,7 @@ runBroker = do
             (hbWorker
              `finally` ztLog ztServLogging Debug "Heartbeating worker exited") $
             A.concurrently_
-            (listenersToBrokerWorker sEnv
+            ((forever $ threadDelay 123123123)
              `finally` ztLog ztServLogging Debug "Listeners to broker worker exited") $
             action
 

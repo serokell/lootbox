@@ -54,8 +54,11 @@ releaseInternalQueue InternalQueue{..} = do
 -- | Sends message to the internal queue.
 iqSend :: InternalQueue t -> t -> IO ()
 iqSend InternalQueue {iqIn, iqTQueue} msg = do
+    putTextLn "Puting to queue"
     atomically $ writeTQueue iqTQueue msg
+    putTextLn "Sending to network"
     Z.sendMulti iqIn $ NE.fromList [""]
+    putTextLn "Sent to network"
 
 -- | Tries to receive something from the queue. This method should be
 -- called after "poll" on "out" socket have succeeded.

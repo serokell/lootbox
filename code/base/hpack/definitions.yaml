@@ -8,7 +8,7 @@
 _definitions:
   _top-level:
     - &meta
-        version:            '0.0.0.0'
+        version:            '0.0.0.3'
         author:             Serokell
         maintainer:         hi@serokell.io
         copyright:          2018 Serokell
