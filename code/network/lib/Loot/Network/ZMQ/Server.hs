@@ -21,6 +21,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async as A
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
+import Control.Exception (getMaskingState)
 import Control.Monad.Except (runExceptT, throwError)
 import Control.Monad.STM (retry)
 import Data.ByteString (ByteString)
@@ -79,6 +80,8 @@ listenersToBrokerWorker ZTNetServEnv { ztListeners, ztListenersQueue, ztServLogg
   where
     action = do
         putTextLn "listenersToBrokerWorker working"
+        mst <- getMaskingState
+        putTextLn $ "Masking state: " <> show mst
         (results :: NE.NonEmpty ZTServSendMsg) <-
            atomically $ do
             (listenerEnvs :: [ZTListenerEnv]) <- Map.elems <$> readTVar ztListeners
@@ -271,12 +274,12 @@ runBroker = do
                         whenJust req processMsg
 
     let withWorkers action =
-            A.concurrently_
+            A.withAsync
             (hbWorker
-             `finally` ztLog ztServLogging Debug "Heartbeating worker exited") $
-            A.concurrently_
-            ((forever $ threadDelay 123123123)
-             `finally` ztLog ztServLogging Debug "Listeners to broker worker exited") $
+             `finally` ztLog ztServLogging Debug "Heartbeating worker exited") $ \_ ->
+            A.withAsync
+            (listenersToBrokerWorker sEnv
+             `finally` ztLog ztServLogging Debug "Listeners to broker worker exited") $ \_ ->
             action
 
     let runAll =

@@ -618,27 +618,36 @@ runBroker = do
 
     -- Runner
     let withWorkers action =
-             A.concurrently_
+             A.withAsync
              (heartbeatWorker ztCliSettings ztHeartbeatInfo ztCliRequestQueue
-              `finally` ztCliLog Debug "Heartbeating worker exited") $
-             A.concurrently_
+              `finally` ztCliLog Debug "Heartbeating worker exited") $ \_ ->
+             A.withAsync
              (clientsToBrokerWorker cEnv
-              `finally` ztCliLog Debug "Clients to broker worker exited") $
+              `finally` ztCliLog Debug "Clients to broker worker exited") $ \_ ->
              action
+
+    let withKek msg action = do
+            putTextLn $ "Starting " <> msg
+            res <- action
+            putTextLn $ "Finished " <> msg
+            return res
 
     let pollAndProcess = do
             cpd@CliPollData{..} <- atomically $ readTVar ztCliPollData
+            putTextLn "Cli polling"
             events <- Z.poll (-1) cpdPolls
+            putTextLn $ "Cli got events: " <> show (length events)
             forM_ (events `zip` [0..]) $ \(e,i) ->
                 unless (null e) $ case resolveSocketIndex i cpd of
-                    BackendSocket (peerId, backSock) -> receiveBack backSock peerId
-                    SubSocket (peerId, subSock)      -> receiveSub subSock peerId
+                    BackendSocket (peerId, backSock) -> withKek "bs" $ receiveBack backSock peerId
+                    SubSocket (peerId, subSock)      -> withKek "ss" $ receiveSub subSock peerId
                     CliSocket -> do
-                        req <- iqReceive ztClientsQueue
-                        whenJust req $ uncurry clientToBackend
+                        req <- withKek "cs1" $ iqReceive ztClientsQueue
+                        whenJust req $ withKek "cs2" . uncurry clientToBackend
                     ReqSocket -> do
-                        req <- iqReceive ztCliRequestQueue
-                        whenJust req processReq
+                        req <- withKek "rs1" $ iqReceive ztCliRequestQueue
+                        whenJust req $ withKek "rs2" . processReq
+            putTextLn "Cli something processed"
 
     let runAll = do
             withWorkers $ forever $
