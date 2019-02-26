@@ -329,7 +329,7 @@ createNetCliEnv globalEnv@ZTGlobalEnv{..} ztCliSettings peers = liftIO $ do
 -- | Terminates client environment.
 termNetCliEnv :: MonadIO m => ZTNetCliEnv -> m ()
 termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
-    ztLog ztCliLogging Error "Terminating client env"
+    ztLog ztCliLogging Debug "Terminating client env"
 
     -- Free the dealer sockets/adapters for peers we're currently
     -- connecting to.
@@ -338,7 +338,7 @@ termNetCliEnv ZTNetCliEnv{..} = liftIO $ do
 
     releaseInternalQueue ztClientsQueue
     releaseInternalQueue ztCliRequestQueue
-    ztLog ztCliLogging Error "Terminating client env done"
+    ztLog ztCliLogging Debug "Terminating client env done"
 
 withNetCliEnv ::
        (MonadIO m, MonadMask m)
