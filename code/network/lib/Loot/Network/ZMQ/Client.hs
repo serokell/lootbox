@@ -542,7 +542,8 @@ runBroker = do
                 res <- atomically $ runExceptT $ do
                     -- check predicates
                     clientRegistered <- Map.member clientId <$> lift (readTVar ztClients)
-                    when clientRegistered $ throwError "client is already registered"
+                    when clientRegistered $
+                        throwError $ "client is already registered: " <> show clientId
 
                     forM_ msgTs $ \msgT -> do
                         msgTClash <- Map.member msgT <$> lift (readTVar ztMsgTypes)

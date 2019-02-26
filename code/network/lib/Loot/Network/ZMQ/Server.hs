@@ -206,7 +206,8 @@ runBroker = do
     let processReq (IRRegister listenerId msgTypes lEnv) = do
             res <- atomically $ runExceptT $ do
                 listenerRegistered <- Map.member listenerId <$> lift (readTVar ztListeners)
-                when listenerRegistered $ throwError "listener is already registered"
+                when listenerRegistered $
+                    throwError $ "listener is already registered: " <> show listenerId
 
                 forM_ msgTypes $ \msgT -> do
                     msgTClash <- Map.member msgT <$> lift (readTVar ztMsgTypes)
