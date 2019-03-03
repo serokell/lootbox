@@ -33,6 +33,10 @@ module Loot.Config.Record
 
        , ItemType
 
+       , ItemLabel
+
+       , LabelsKnown
+
        , finalise
        , finaliseDeferredUnsafe
        , complement
@@ -56,10 +60,10 @@ module Loot.Config.Record
 import Data.Default (Default (..))
 import Data.Validation (Validation (Failure, Success), toEither)
 import Data.Vinyl (Label, Rec ((:&), RNil))
-import Data.Vinyl.Lens (RecElem, rlens, rreplace, type (<:))
+import Data.Vinyl.Lens (type (<:), RecElem, rlens, rreplace)
 import Data.Vinyl.TypeLevel (RIndex)
-import GHC.TypeLits (AppendSymbol, ErrorMessage ((:<>:), ShowType, Text),
-    KnownSymbol, Symbol, symbolVal, TypeError)
+import GHC.TypeLits (AppendSymbol, ErrorMessage ((:<>:), ShowType, Text), KnownSymbol, Symbol,
+                     TypeError, symbolVal)
 
 import qualified Text.Show (Show (show))
 
@@ -108,8 +112,7 @@ type family Item' (k :: ConfigKind) (i :: ItemKind) where
     Item' 'Partial (l ::: t)  = Maybe t
     Item' 'Final   (l ::: t)  = t
     Item' k        (l ::< is) = ConfigRec k is
-    Item' 'Partial (l ::+ is) = ConfigRec 'Partial (SumSelection l : is)
-    Item' 'Final   (l ::+ is) = ConfigRec 'Final   (SumSelection l : is)
+    Item' k        (l ::+ is) = ConfigRec k (SumSelection l : is)
     Item' 'Partial (l ::- is) = ConfigRec 'Partial is
     Item' 'Final   (l ::- is) = Maybe (ConfigRec 'Final is)
 
@@ -125,8 +128,7 @@ data Item (k :: ConfigKind) (i :: ItemKind) where
     ItemOptionP   :: Item' 'Partial (l ::: t)  -> Item 'Partial (l ::: t)
     ItemOptionF   :: Item' 'Final   (l ::: t)  -> Item 'Final   (l ::: t)
     ItemSub       :: Item' k        (l ::< is) -> Item k        (l ::< is)
-    ItemSumP      :: Item' 'Partial (l ::+ is) -> Item 'Partial (l ::+ is)
-    ItemSumF      :: Item' 'Final   (l ::+ is) -> Item 'Final   (l ::+ is)
+    ItemSum       :: Item' k        (l ::+ is) -> Item k        (l ::+ is)
     ItemBranchP   :: Item' 'Partial (l ::- is) -> Item 'Partial (l ::- is)
     ItemBranchF   :: Item' 'Final   (l ::- is) -> Item 'Final   (l ::- is)
 
@@ -135,8 +137,7 @@ cfgItem :: Functor f => (Item' k d -> f (Item' k d)) -> Item k d -> f (Item k d)
 cfgItem f (ItemOptionP x)   = ItemOptionP <$> f x
 cfgItem f (ItemOptionF x)   = ItemOptionF <$> f x
 cfgItem f (ItemSub rec)     = ItemSub <$> f rec
-cfgItem f (ItemSumP rec)    = ItemSumP <$> f rec
-cfgItem f (ItemSumF rec)    = ItemSumF <$> f rec
+cfgItem f (ItemSum rec)     = ItemSum <$> f rec
 cfgItem f (ItemBranchP rec) = ItemBranchP <$> f rec
 cfgItem f (ItemBranchF rec) = ItemBranchF <$> f rec
 
@@ -234,9 +235,9 @@ finalise' prf brc (item@(ItemSub rec) :& xs)
     = (:&)
     <$> (ItemSub <$> finalise' (prf <> itemLabel item <> ".") Nothing rec)
     <*> finalise' prf brc xs
-finalise' prf brc (item@(ItemSumP rec) :& xs)
+finalise' prf brc (item@(ItemSum rec) :& xs)
     = (:&)
-    <$> (ItemSumF <$> finaliseSum (prf <> itemLabel item <> ".") rec)
+    <$> (ItemSum <$> finaliseSum (prf <> itemLabel item <> ".") rec)
     <*> finalise' prf brc xs
 finalise' prf (Just sel) (item@(ItemBranchP rec) :& xs) =
     if sel == itemLabel item
@@ -286,8 +287,8 @@ finaliseDeferredUnsafe' brc (item@(ItemOptionP opt) :& ps) =
     in ItemOptionF (opt ?: error failureMsg) :& finaliseDeferredUnsafe' brc ps
 finaliseDeferredUnsafe' brc (ItemSub part :& ps) =
     ItemSub (finaliseDeferredUnsafe' Nothing part) :& finaliseDeferredUnsafe' brc ps
-finaliseDeferredUnsafe' brc (ItemSumP part :& ps) =
-    ItemSumF (finaliseDeferredUnsafeSum part) :& finaliseDeferredUnsafe' brc ps
+finaliseDeferredUnsafe' brc (ItemSum part :& ps) =
+    ItemSum (finaliseDeferredUnsafeSum part) :& finaliseDeferredUnsafe' brc ps
 finaliseDeferredUnsafe' Nothing (ItemBranchP _ :& ps) =
     ItemBranchF Nothing :& finaliseDeferredUnsafe' Nothing ps
 finaliseDeferredUnsafe' (Just sel) (item@(ItemBranchP rec) :& ps) =
@@ -319,8 +320,8 @@ complement (ItemOptionP opt :& ps) (ItemOptionF sup :& fs)
     = ItemOptionF (fromMaybe sup opt) :& complement ps fs
 complement (ItemSub part :& ps) (ItemSub final :& fs)
     = ItemSub (complement part final) :& complement ps fs
-complement (ItemSumP (_ :& part) :& ps) (ItemSumF (f :& final) :& fs)
-    = ItemSumF (f :& complement part final) :& complement ps fs
+complement (ItemSum (_ :& part) :& ps) (ItemSum (f :& final) :& fs)
+    = ItemSum (f :& complement part final) :& complement ps fs
 complement (ItemBranchP part :& ps) (ItemBranchF final :& fs)
     = ItemBranchF (complement part <$> final) :& complement ps fs
 
@@ -441,8 +442,7 @@ instance
     show item@(ItemOptionP Nothing)    = itemLabel item ++ " <unset>"
     show item@(ItemOptionF x)          = itemLabel item ++ " =: " ++ show x
     show item@(ItemSub rec)            = itemLabel item ++ " =< " ++ show rec
-    show item@(ItemSumP rec)           = itemLabel item ++ " =+ " ++ show rec
-    show item@(ItemSumF rec)           = itemLabel item ++ " =+ " ++ show rec
+    show item@(ItemSum rec)            = itemLabel item ++ " =+ " ++ show rec
     show item@(ItemBranchP rec)        = itemLabel item ++ " =- " ++ show rec
     show item@(ItemBranchF (Just rec)) = itemLabel item ++ " =- " ++ show rec
     show item@(ItemBranchF Nothing)    = itemLabel item ++ " <unselected>"
@@ -452,7 +452,7 @@ instance
     ) => Semigroup (Item 'Partial i) where
     ItemOptionP x1 <> ItemOptionP x2 = ItemOptionP . getLast $ Last x1 <> Last x2
     ItemSub r1 <> ItemSub r2 = ItemSub $ r1 <> r2
-    ItemSumP r1 <> ItemSumP r2 = ItemSumP $ r1 <> r2
+    ItemSum r1 <> ItemSum r2 = ItemSum $ r1 <> r2
     ItemBranchP r1 <> ItemBranchP r2 = ItemBranchP $ r1 <> r2
 
 
@@ -473,7 +473,7 @@ instance
     , SubRecsConstrained Monoid 'Partial '[l ::+ is]
     ) => Monoid (Item 'Partial (l ::+ is))
   where
-    mempty = ItemSumP mempty
+    mempty = ItemSum mempty
     mappend = (<>)
 
 instance
@@ -504,7 +504,7 @@ instance
     ( Default (ConfigRec 'Partial is)
     , Default (ConfigRec 'Partial t)
     ) => Default (ConfigRec 'Partial ((i ::+ t) : is)) where
-    def = ItemSumP def :& def
+    def = ItemSum def :& def
 
 instance
     ( Default (ConfigRec 'Partial t)

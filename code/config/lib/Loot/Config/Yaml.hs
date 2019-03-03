@@ -4,9 +4,9 @@
 
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE KindSignatures       #-}
+{-# LANGUAGE MonoLocalBinds       #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE MonoLocalBinds       #-}
 
 -- | Utilities for reading configuration from a file.
 module Loot.Config.Yaml
@@ -18,9 +18,9 @@ import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault, to
 import Data.Vinyl (Rec ((:&), RNil))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 
-import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Partial),
-                           ConfigRec, Item (ItemOptionP, ItemSub, ItemSumP, ItemBranchP),
-                           ItemKind, SumSelection)
+import Loot.Config.Record ((::+), (::-), (:::), (::<), ConfigKind (Partial), ConfigRec,
+                           Item (ItemBranchP, ItemOptionP, ItemSub, ItemSum), ItemKind,
+                           SumSelection)
 
 
 -- | This class is almost like 'FromJSON' but uses @aeson-better-errors@.
@@ -66,7 +66,7 @@ instance
     => OptionsFromJson ((l ::+ us) ': is)
   where
     configParser = (:&)
-        <$> fmap ItemSumP (parseMulti (Proxy :: Proxy l))
+        <$> fmap ItemSum (parseMulti (Proxy :: Proxy l))
         <*> configParser
 
 instance
