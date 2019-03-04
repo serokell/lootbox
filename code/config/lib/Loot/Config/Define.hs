@@ -52,6 +52,10 @@ instance RecFromTuple (Rec (f :: u -> *) '[a, b, c, d, e, g]) where
     type IsoRecTuple (Rec f '[a, b, c, d, e, g]) = (f a, f b, f c, f d, f e, f g)
     recFromTuple (a, b, c, d, e, g) = a :& b :& c :& d :& e :& g :& RNil
 
+instance RecFromTuple (Rec (f :: u -> *) '[a, b, c, d, e, g, h]) where
+    type IsoRecTuple (Rec f '[a, b, c, d, e, g, h]) = (f a, f b, f c, f d, f e, f g, f h)
+    recFromTuple (a, b, c, d, e, g, h) = a :& b :& c :& d :& e :& g :& h :& RNil
+
 
 -- | Helper typeclass used to define configurations.
 -- This is a safer way than just filling empty configuration via lenses
@@ -73,9 +77,7 @@ instance DefineItem 'Partial (l ::: t) where
 
 instance RecFromTuple (ConfigRec k is) =>
          DefineItem k (l ::< is) where
-    type ManualItemDefinition k (l ::< is) =
-        IsoRecTuple (Item' k (l ::< is))
-    _ =:: is = ItemSub (recFromTuple is)
+    _ =:: is = ItemSub is
 
 instance ( RecFromTuple (ConfigRec 'Final (SumSelection l ': is))
          , KnownSymbol l
@@ -133,8 +135,8 @@ chooseBranch
 chooseBranch l d = fillBranch l (recFromTuple d)
 
 -- | Start defining your config with this function.
-defineConfig :: (ConfigRec k d ~ c, RecFromTuple c) => IsoRecTuple c -> c
-defineConfig = recFromTuple
+define :: (ConfigRec k d ~ c, RecFromTuple c) => IsoRecTuple c -> c
+define = recFromTuple
 
 -----------------------
 -- Test sample
@@ -158,13 +160,13 @@ type SampleConfig =
     ]
 
 _sampleConfig :: ConfigRec 'Final SampleConfig
-_sampleConfig = defineConfig
+_sampleConfig = define
     ( #a =:: 5
-    , #b =::
+    , #b =:: define
        ( #c =:: 1
        , #d =:: ""
        )
-    , #e =:: ()
+    , #e =:: define ()
     , #f =:: chooseBranch #f1
        ( #g =:: 0
        , #h =:: ()
