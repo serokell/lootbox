@@ -6,7 +6,6 @@ extra-deps:
 - relude-0.3.0
 - typerep-map-0.3.0
 - primitive-0.6.4.0
-- o-clock-0.1.1
 
 - git: https://github.com/kowainik/co-log.git
   commit: 41cc915e42628c9cc4eea28db2ecdf11bd0e413e
@@ -19,9 +18,6 @@ extra-deps:
 
 - git: https://github.com/serokell/co-log-sys.git
   commit: a699c4eb00e413eb3cb2e9b34bfc7c1451b21279
-
-- git: git@github.com:serokell/log-warper.git
-  commit: 5bec0f615914228c26aa1cc33bb47abe0f91c9b0
 
 - componentm-0.0.0.2
 - teardown-0.5.0.0
