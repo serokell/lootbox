@@ -44,7 +44,6 @@ withConfigAction LogConfig {..} = runCont $
     cfilter predicate <$> cont (withLogCombined $ map makeContAction backends)
   where
     makeContAction = \case
-        StdOut -> withLogMessageStdout
         StdErr -> withLogMessageStderr
         File path -> withLogMessageFile path
         Syslog syslogConfig -> withLogMessageSyslog syslogConfig
