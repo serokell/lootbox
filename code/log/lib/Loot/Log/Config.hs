@@ -25,15 +25,14 @@ data LogConfig = LogConfig
     } deriving (Show, Eq)
 
 data BackendConfig
-    = StdOut
-    | StdErr
+    = StdErr
     | File FilePath
     | Syslog SyslogConfig
     deriving (Show, Eq)
 
 -- | Basic configuration: just prints log messages to stdout, without filtering
 basicConfig :: LogConfig
-basicConfig = LogConfig [StdOut] Debug
+basicConfig = LogConfig [StdErr] Debug
 
 -- | Loads a 'LogConfig' from a Yaml file. Returns 'basicConfig' is something
 -- goes wrong. It's equivalent to do: 'loadConfigDefault' 'basicConfig'
@@ -53,7 +52,7 @@ loadConfigDefault defaultConfig filePath =
 
 instance FromJSON LogConfig where
     parseJSON = withObject "LogConfig" $ \v -> LogConfig
-        <$> v .:? "backends"     .!= [StdOut]
+        <$> v .:? "backends"     .!= [StdErr]
         <*> v .:? "min-severity" .!= Debug
 
 instance ToJSON LogConfig where
@@ -66,7 +65,6 @@ instance FromJSON BackendConfig where
     parseJSON = withObject "BackendConfig" $ \v -> do
         destType <- v .: "type"
         case destType :: Text of
-            "stdout" -> return StdOut
             "stderr" -> return StdErr
             "file" -> File <$> v .: "path"
             "syslog" -> Syslog <$> parseJSON (Object v) -- short-circuiting: it will 
@@ -75,9 +73,6 @@ instance FromJSON BackendConfig where
 
 instance ToJSON BackendConfig where
     toJSON = \case
-        StdOut -> object
-            [ "type" .= ("stdout" :: Text)
-            ]
         StdErr -> object
             [ "type" .= ("stderr" :: Text)
             ]

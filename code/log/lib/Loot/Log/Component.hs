@@ -27,7 +27,6 @@ allocateLogging LogConfig {..} nameSel = do
 
 allocateBackend :: MonadIO m => Int -> BackendConfig -> ComponentM (LogAction m Message)
 allocateBackend n = \case
-    StdOut -> buildComponent_ (buildName "stdout") $ pure logMessageStdout
     StdErr -> buildComponent_ (buildName "stderr") $ pure logMessageStderr
     File path -> logMessageFile <$>
         buildComponent (buildName "file") (openFile path AppendMode) hClose
