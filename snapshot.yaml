@@ -1,5 +1,5 @@
 name: lootbox-snapshot
-resolver: lts-14.14
+resolver: lts-14.15
 
 packages:
   - co-log-sys-0.1.1.0
