@@ -7,8 +7,6 @@ module Loot.Network.ZMQ.Internal
     , heartbeatSubscription
     ) where
 
-import Prelude hiding (log)
-
 import Control.Monad.STM (retry)
 import qualified Data.List.NonEmpty as NE
 import GHC.Stack (HasCallStack, callStack)

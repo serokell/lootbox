@@ -1,16 +1,18 @@
 name: lootbox-snapshot
-resolver: lts-11.17
+resolver: lts-14.14
 
 packages:
-  - base-noprelude-4.10.1.0
-  - serialise-0.2.0.0
-  - vinyl-0.8.1.1
+  - co-log-sys-0.1.1.0
+  - componentm-0.0.0.2
 
   - git: https://github.com/int-index/caps
-    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671 
+    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671
 
-  # for serialise
-  - cborg-0.2.0.0
+  - git: https://github.com/serokell/zeromq-haskell
+    commit: 714ac20981b2d346609fd896a1af4d31eb6d1162
+
+  # for componentm
+  - teardown-0.5.0.1
 
 flags:
   serialise:

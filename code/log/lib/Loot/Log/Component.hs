@@ -11,7 +11,6 @@ import Colog.Core.Action (LogAction (..), cfilter)
 import Colog.Syslog (mkSyslogHandler, shClose)
 import Control.Monad.Component (ComponentM, buildComponent, buildComponent_)
 import Fmt ((+|), (|+))
-import System.IO (hClose)
 
 -- | Builds a 'Logging' 'ComponentM' with the name "logging" from a 'LogConfig'
 allocateLogging
