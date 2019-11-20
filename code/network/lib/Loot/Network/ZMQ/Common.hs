@@ -21,8 +21,6 @@ module Loot.Network.ZMQ.Common
     , withZTGlobalEnv
     ) where
 
-import Prelude hiding (log)
-
 import Codec.Serialise (Serialise)
 import qualified Data.List as L
 import qualified System.ZMQ4 as Z

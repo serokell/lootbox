@@ -6,8 +6,6 @@
 
 module Loot.Network.Example () where
 
-import Prelude hiding (log)
-
 import Control.Concurrent (threadDelay, withMVar)
 import qualified Control.Concurrent.Async.Lifted as A
 import Control.Lens (makeLenses)

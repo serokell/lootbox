@@ -351,7 +351,7 @@ type family ItemType l is where
 
 -- | Check whether a configuration of kind @k@ contains an item of type @l ::: v@.
 type HasOption l is v =
-    ( RecElem Rec (l ::: v) is (RIndex (l ::: v) is)
+    ( RecElem Rec (l ::: v) (l ::: v) is is (RIndex (l ::: v) is)
     , ItemType l is ~ (l ::: v)
     )
 
@@ -361,12 +361,12 @@ option :: forall k l v g is a. (Functor g, a ~ Item' k (l ::: v), HasOption l is
     -> (a -> g a)
     -> ConfigRec k is
     -> g (ConfigRec k is)
-option _ = rlens (Proxy :: Proxy (l ::: v)) . cfgItem
+option _ = rlens @(l ::: v) . cfgItem
 
 
 -- | Check whether the configuration has the subsection.
 type HasSub l is us =
-    ( RecElem Rec (l ::< us) is (RIndex (l ::< us) is)
+    ( RecElem Rec (l ::< us) (l ::< us) is is (RIndex (l ::< us) is)
     , ItemType l is ~ (l ::< us)
     )
 
@@ -376,11 +376,11 @@ sub :: forall k l us g is a. (Functor g, a ~ Item' k (l ::< us), HasSub l is us)
     -> (a -> g a)
     -> ConfigRec k is
     -> g (ConfigRec k is)
-sub _ = rlens (Proxy :: Proxy (l ::< us)) . cfgItem
+sub _ = rlens @(l ::< us) . cfgItem
 
 -- | Check whether the configuration has the sum-type.
 type HasSum l is us =
-    ( RecElem Rec (l ::+ us) is (RIndex (l ::+ us) is)
+    ( RecElem Rec (l ::+ us) (l ::+ us) is is (RIndex (l ::+ us) is)
     , ItemType l is ~ (l ::+ us)
     )
 
@@ -390,11 +390,11 @@ tree :: forall k l us g is a. (Functor g, a ~ Item' k (l ::+ us), HasSum l is us
     -> (a -> g a)
     -> ConfigRec k is
     -> g (ConfigRec k is)
-tree _ = rlens (Proxy :: Proxy (l ::+ us)) . cfgItem
+tree _ = rlens @(l ::+ us) . cfgItem
 
 -- | Check whether the configuration has the branch.
 type HasBranch l is us =
-    ( RecElem Rec (l ::- us) is (RIndex (l ::- us) is)
+    ( RecElem Rec (l ::- us) (l ::- us) is is (RIndex (l ::- us) is)
     , ItemType l is ~ (l ::- us)
     )
 
@@ -404,7 +404,7 @@ branch :: forall k l us g is a. (Functor g, a ~ Item' k (l ::- us), HasBranch l 
     -> (a -> g a)
     -> ConfigRec k is
     -> g (ConfigRec k is)
-branch _ = rlens (Proxy :: Proxy (l ::- us)) . cfgItem
+branch _ = rlens @(l ::- us) . cfgItem
 
 -- | Lens that focuses on the selection option of a tree/sum-type
 selection
@@ -418,7 +418,7 @@ selection
     => (a -> g a)
     -> ConfigRec k is
     -> g (ConfigRec k is)
-selection = rlens (Proxy :: Proxy (l ::: v)) . cfgItem
+selection = rlens @(l ::: v) . cfgItem
 
 -----------------------
 -- Basic instances

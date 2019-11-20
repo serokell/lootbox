@@ -1,5 +1,5 @@
 with import <nixpkgs> { };
-let hspkgs = haskell.packages.ghc822; in
+let hspkgs = haskell.packages.ghc865; in
 haskell.lib.buildStackProject {
    ghc = hspkgs.ghc;
    name = "lootbox";

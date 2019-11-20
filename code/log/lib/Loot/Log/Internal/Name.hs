@@ -3,7 +3,7 @@ module Loot.Log.Internal.Name
        ( Name (Name, unName)
        , fromList
        , fromString
-       
+
        , nameFromStack
        , pkgName
 
@@ -11,7 +11,7 @@ module Loot.Log.Internal.Name
        , selectLogName
        ) where
 
-import Prelude hiding (log, toList)
+import Prelude hiding (toList)
 
 import Data.Aeson (FromJSON (..), ToJSON(..), Value (String))
 import Data.DList (DList)

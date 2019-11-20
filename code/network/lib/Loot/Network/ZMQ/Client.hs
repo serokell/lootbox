@@ -566,7 +566,7 @@ runBroker = do
 
                     pure (newSubs,allSubSockets)
                 let (newSubs,allSubSockets) =
-                        either (\e -> error $ "Client IRRegister: " <> e) identity res
+                        either (\e -> error $ "Client IRRegister: " <> e) id res
                 forM_ allSubSockets $ \subSocket ->
                     forM_ newSubs $ Z.subscribe subSocket . unSubscription
                 ztCliLog Debug $ "Registered client " <> show clientId <> " subs " <> show newSubs

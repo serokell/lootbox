@@ -1,26 +1,6 @@
 resolver: snapshot.yaml
 
-extra-deps:
-# Required by co-log and co-log-core
-- contravariant-1.5
-- relude-0.3.0
-- typerep-map-0.3.0
-- primitive-0.6.4.0
-
-- git: https://github.com/kowainik/co-log.git
-  commit: 41cc915e42628c9cc4eea28db2ecdf11bd0e413e
-  subdirs:
-  - co-log-core
-  - co-log
-
-- git: https://github.com/serokell/zeromq-haskell
-  commit: 714ac20981b2d346609fd896a1af4d31eb6d1162
-
-- git: https://github.com/serokell/co-log-sys.git
-  commit: a699c4eb00e413eb3cb2e9b34bfc7c1451b21279
-
-- componentm-0.0.0.2
-- teardown-0.5.0.0
+extra-deps: []  # Please, use snapshot.yaml
 
 packages:
   - code/base

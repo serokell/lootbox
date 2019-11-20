@@ -18,7 +18,6 @@ library:
     - fmt
     - hslogger
     - loot-base
-    - log-warper
     - microlens
     - microlens-th
     - monad-control
