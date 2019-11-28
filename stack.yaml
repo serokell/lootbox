@@ -13,7 +13,7 @@ packages:
   - code/demo
 
 nix:
-  shell-file: shell.nix
+  shell-file: stack-shell.nix
 
 ghc-options:
   "$locals": -Wall
