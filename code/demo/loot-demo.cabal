@@ -1,0 +1,44 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 412043eb0030a29479aca350b6c30ad70b42fb2de4b1fac6cb431f5dbef23ee5
+
+name:           loot-demo
+version:        0.0.0
+build-type:     Simple
+
+library
+  exposed-modules:
+      Loot.Demo.Config
+  other-modules:
+      Paths_loot_demo
+  hs-source-dirs:
+      lib
+  ghc-options: -Wall
+  build-depends:
+      base-noprelude
+    , loot-config
+    , loot-log
+    , loot-prelude
+  default-language: Haskell2010
+
+executable loot-demo
+  main-is: Main.hs
+  other-modules:
+      Paths_loot_demo
+  hs-source-dirs:
+      app
+  ghc-options: -Wall
+  build-depends:
+      base-noprelude
+    , caps
+    , fmt
+    , loot-config
+    , loot-demo
+    , loot-log
+    , loot-prelude
+    , yaml
+  default-language: Haskell2010
