@@ -21,17 +21,17 @@ packages:
 - completed:
     cabal-file:
       size: 1096
-      sha256: 4764e87aec2b60606a725d4142b511dbd392055adaa011b66781cb5510080660
+      sha256: 23f4be93bd29f79b7d1e623dcdbbbf6e385361296a5226f86bbee6f244ce4194
     name: caps
     version: '0'
     git: https://github.com/int-index/caps
     pantry-tree:
       size: 374
-      sha256: f44d5de8df0e452672192f58e9ae288afeb84ee484d464832f044f1d4c5ab921
-    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671
+      sha256: 88b8b2ba4213985a67303961ba239b61739d4bc00dcebafa0ce80163d1aaed2c
+    commit: ab4345eabd58fc6f05d3b46bea2c5acdba3ec6f8
   original:
     git: https://github.com/int-index/caps
-    commit: 6938f8dcefa1aa8aa7d7f272eb0828a3da463671
+    commit: ab4345eabd58fc6f05d3b46bea2c5acdba3ec6f8
 - completed:
     cabal-file:
       size: 2698
