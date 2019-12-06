@@ -1,0 +1,55 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 9c06f26e9b4c65739a8b557ffe53bc0f56c81ef8bcd377a56700530f57dd598f
+
+name:           loot-base
+version:        0.0.0.0
+homepage:       https://github.com/serokell/lootbox#readme
+bug-reports:    https://github.com/serokell/lootbox/issues
+author:         Serokell
+maintainer:     hi@serokell.io
+copyright:      2018 Serokell
+license:        MPL-2.0
+license-file:   LICENCE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/serokell/lootbox
+
+library
+  exposed-modules:
+      Loot.Base.HasLens
+  other-modules:
+      Paths_loot_base
+  hs-source-dirs:
+      lib
+  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  ghc-options: -Wall -hide-package base
+  build-depends:
+      base-noprelude
+    , loot-prelude
+    , tagged
+  default-language: Haskell2010
+
+test-suite loot-base-test
+  type: exitcode-stdio-1.0
+  main-is: Test.hs
+  other-modules:
+      Paths_loot_base
+  hs-source-dirs:
+      test
+  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  ghc-options: -Wall -hide-package base -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base-noprelude
+    , loot-prelude
+    , tasty
+    , tasty-discover
+  default-language: Haskell2010

@@ -1,0 +1,37 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 9e9f6be7b00d52830f9b52a5a883961824b769868e91896b53aced7ba492f280
+
+name:           loot-prelude
+version:        0.0.0.0
+homepage:       https://github.com/serokell/lootbox#readme
+bug-reports:    https://github.com/serokell/lootbox/issues
+author:         Serokell
+maintainer:     hi@serokell.io
+copyright:      2018 Serokell
+license:        MPL-2.0
+license-file:   LICENCE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/serokell/lootbox
+
+library
+  exposed-modules:
+      Prelude
+  other-modules:
+      Paths_loot_prelude
+  hs-source-dirs:
+      lib
+  ghc-options: -Wall -hide-package base
+  build-depends:
+      base-noprelude
+    , universum
+  default-language: Haskell2010

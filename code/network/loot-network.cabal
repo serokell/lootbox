@@ -1,0 +1,111 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: ae5e1e9d98c657b4d9b12558a354f86a7b56cee4e81ebb06761a1eb8d83e24e1
+
+name:           loot-network
+version:        0.0.0.0
+homepage:       https://github.com/serokell/lootbox#readme
+bug-reports:    https://github.com/serokell/lootbox/issues
+author:         Serokell
+maintainer:     hi@serokell.io
+copyright:      2018 Serokell
+license:        MPL-2.0
+license-file:   LICENCE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/serokell/lootbox
+
+library
+  exposed-modules:
+      Loot.Network.BiTQueue
+      Loot.Network.Class
+      Loot.Network.Example
+      Loot.Network.Message
+      Loot.Network.Utils
+      Loot.Network.ZMQ
+      Loot.Network.ZMQ.Client
+      Loot.Network.ZMQ.Common
+      Loot.Network.ZMQ.Instance
+      Loot.Network.ZMQ.Internal
+      Loot.Network.ZMQ.InternalQueue
+      Loot.Network.ZMQ.Server
+  other-modules:
+      Paths_loot_network
+  hs-source-dirs:
+      lib
+  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  ghc-options: -Wall -hide-package base
+  build-depends:
+      async
+    , base-noprelude
+    , bytestring
+    , containers
+    , data-default
+    , dependent-map
+    , dependent-sum
+    , lens
+    , lifted-async
+    , loot-base
+    , loot-log
+    , loot-prelude
+    , mtl
+    , random
+    , reflection
+    , safe-exceptions
+    , serialise
+    , singletons
+    , stm
+    , tagged
+    , text
+    , time
+    , unordered-containers
+    , zeromq4-haskell
+  default-language: Haskell2010
+
+test-suite loot-base-test
+  type: exitcode-stdio-1.0
+  main-is: Test.hs
+  other-modules:
+      Message
+      Paths_loot_network
+  hs-source-dirs:
+      test
+  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  ghc-options: -Wall -hide-package base -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      async
+    , base-noprelude
+    , hedgehog
+    , hspec
+    , loot-network
+    , loot-prelude
+    , serialise
+    , stm
+    , tasty
+    , tasty-discover
+    , tasty-hedgehog
+    , tasty-hspec
+    , zeromq4-haskell
+  default-language: Haskell2010
+
+benchmark loot-net-bench
+  type: exitcode-stdio-1.0
+  main-is: Bench.hs
+  other-modules:
+      Paths_loot_network
+  hs-source-dirs:
+      bench
+  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  ghc-options: -Wall -hide-package base -threaded
+  build-depends:
+      base-noprelude
+    , loot-prelude
+  default-language: Haskell2010
