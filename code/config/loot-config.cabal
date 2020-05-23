@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.31.2.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6ebb1bd44c4c2e80aacb126114954190d85eada672cfe689b45e287efaf555e5
+-- hash: 84b9622684f4111a4c0cb7337a9b50994d1538881763418fa9616e25cec28c3f
 
 name:           loot-config
 version:        0.0.0.0
@@ -27,6 +27,7 @@ library
   exposed-modules:
       Loot.Config
       Loot.Config.CLI
+      Loot.Config.Env
       Loot.Config.Lens
       Loot.Config.Record
       Loot.Config.Yaml
@@ -40,11 +41,15 @@ library
       aeson
     , aeson-better-errors
     , base-noprelude
+    , containers
     , data-default
+    , fmt
     , loot-base
     , loot-prelude
     , microlens
+    , mtl
     , optparse-applicative
+    , text
     , validation
     , vinyl
   default-language: Haskell2010
@@ -62,6 +67,7 @@ test-suite loot-base-test
   build-depends:
       aeson
     , base-noprelude
+    , fmt
     , hedgehog
     , loot-base
     , loot-config
