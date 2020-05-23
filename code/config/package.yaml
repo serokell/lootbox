@@ -8,10 +8,14 @@ library:
   dependencies:
     - aeson
     - aeson-better-errors
+    - containers
     - data-default
+    - fmt
     - loot-base
     - microlens
+    - mtl
     - optparse-applicative
+    - text
     - unordered-containers
     - validation
     - vinyl
@@ -31,5 +35,6 @@ tests:
       - tasty-hunit
 
       - aeson
+      - fmt
       - text
       - optparse-applicative

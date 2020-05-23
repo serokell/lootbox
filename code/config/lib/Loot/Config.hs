@@ -7,6 +7,7 @@
 module Loot.Config
        ( module Loot.Config.Record
        , module Loot.Config.Generics
+       , module Loot.Config.Env
        , module Loot.Config.Lens
        , module Loot.Config.CLI
 
@@ -20,6 +21,7 @@ import Lens.Micro ((?~))
 
 import Loot.Config.CLI
 import Loot.Config.Generics
+import Loot.Config.Env (parseEnv, parseEnvPure)
 import Loot.Config.Lens
 import Loot.Config.Record ((::+), (::-), (:::), (::<), ConfigKind (Final, Partial), ConfigRec,
                            branch, complement, finalise, finaliseDeferredUnsafe, option, selection,

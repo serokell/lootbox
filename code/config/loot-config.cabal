@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 307894133adc515bce8125fc12e960451e00e29e69adc56ed0ccbcb45501cb75
+-- hash: 48b0af055e03b61ee0d8c819d18b818d5d6312d828b48f8212c182b17ef89526
 
 name:           loot-config
 version:        0.0.0.0
@@ -27,6 +27,7 @@ library
   exposed-modules:
       Loot.Config
       Loot.Config.CLI
+      Loot.Config.Env
       Loot.Config.Generics
       Loot.Config.Lens
       Loot.Config.Record
@@ -61,11 +62,15 @@ library
       aeson
     , aeson-better-errors
     , base-noprelude
+    , containers
     , data-default
+    , fmt
     , loot-base
     , loot-prelude
     , microlens
+    , mtl
     , optparse-applicative
+    , text
     , unordered-containers
     , validation
     , vinyl
@@ -104,6 +109,7 @@ test-suite loot-base-test
   build-depends:
       aeson
     , base-noprelude
+    , fmt
     , hedgehog
     , loot-base
     , loot-config
