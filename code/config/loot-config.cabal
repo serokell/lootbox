@@ -27,6 +27,7 @@ library
   exposed-modules:
       Loot.Config
       Loot.Config.CLI
+      Loot.Config.Generics
       Loot.Config.Lens
       Loot.Config.Record
       Loot.Config.Yaml
