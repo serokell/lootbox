@@ -448,3 +448,8 @@ test_envParsing =
           cfg2 ^. option #int @=? Nothing
           cfg2 ^. option #str @=? Nothing
     ]
+
+unit_requiredEnvVars :: Assertion
+unit_requiredEnvVars = do
+    requiredVars (Proxy @SubFields) @=?
+        ["INT2", "BOOL", "SUB2_STR2", "SUB2_MEM"]

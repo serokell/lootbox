@@ -32,6 +32,7 @@ environmental variables:
 module Loot.Config.Env
        ( parseEnv
        , parseEnvPure
+       , requiredVars
 
          -- * Parsing individual values
        , EnvValue (..)
@@ -47,6 +48,7 @@ module Loot.Config.Env
        , defaultOptions
        , parseEnvWith
        , parseEnvPureWith
+       , requiredVarsWith
 
          -- * Types
        , EnvParseError (..)
@@ -193,8 +195,13 @@ class OptionsFromEnv (is :: [ItemKind]) where
         -> Path
         -> Either EnvParseError (ConfigRec 'Partial is)
 
+    -- | Internal method which collects names of expected env variables.
+    -- Returns hand-crafted DList.
+    gatherRequired :: ParseOptions -> Path -> Proxy is -> Endo [Text]
+
 instance OptionsFromEnv '[] where
     envParser _ _ _ = pure RNil
+    gatherRequired _ _ = mempty
 
 instance
     forall l v is.
@@ -208,12 +215,20 @@ instance
       where
         parseOption :: Either EnvParseError (Maybe v)
         parseOption =
-            let mvalue = Map.lookup key env
+            let key = mkEnvKey options path (Proxy @l)
+                mvalue = Map.lookup key env
             in first (EnvParseError key mvalue) $
-               runExcept . runMaybeT $
-               runParser $ parseEnvValue mvalue
+                runExcept . runMaybeT $
+                runParser (parseEnvValue mvalue)
 
-        key = keyBuilder options (NE.fromList . reverse $ symbolValT (Proxy @l) : path)
+    gatherRequired options path _ =
+        Endo (mkEnvKey options path (Proxy @l) :) <>
+        gatherRequired options path (Proxy @is)
+
+-- | Internal method which constructs a env key for config item.
+mkEnvKey :: KnownSymbol l => ParseOptions -> Path -> Proxy l -> Text
+mkEnvKey options path lp =
+    keyBuilder options . NE.fromList $ reverse (symbolValT lp : path)
 
 instance
     forall l us is.
@@ -226,6 +241,9 @@ instance
     envParser options env path = (:&)
         <$> fmap ItemSub (envParser options env $ symbolValT (Proxy @l) : path)
         <*> envParser options env path
+    gatherRequired options path _ =
+        gatherRequired options (symbolValT (Proxy @l) : path) (Proxy @us) <>
+        gatherRequired options path (Proxy @is)
 
 instance
     forall l us is.
@@ -238,6 +256,11 @@ instance
     envParser options env path = (:&)
         <$> fmap ItemSumP (envParser options env $ symbolValT (Proxy @l) : path)
         <*> envParser options env path
+    gatherRequired options path _ =
+        gatherRequired options (symbolValT (Proxy @l) : path) usp <>
+        gatherRequired options path (Proxy @is)
+      where
+        usp = Proxy @(SumSelection l : us)
 
 instance
     forall l us is.
@@ -250,6 +273,9 @@ instance
     envParser options env path = (:&)
         <$> fmap ItemBranchP (envParser options env $ symbolValT (Proxy @l) : path)
         <*> envParser options env path
+    gatherRequired options path _ =
+        gatherRequired options (symbolValT (Proxy @l) : path) (Proxy @us) <>
+        gatherRequired options path (Proxy @is)
 
 -- | Internal helper for demoting type-level text.
 symbolValT :: KnownSymbol l => Proxy l -> Text
@@ -292,6 +318,15 @@ parseEnvPureWith
     -> Either EnvParseError (ConfigRec 'Partial is)
 parseEnvPureWith options env =
     envParser options (Map.fromList $ first fromString <$> env) []
+
+-- | Returns names of all environmental variables which the given configuration
+-- is going to read.
+requiredVars :: OptionsFromEnv is => Proxy is -> [Text]
+requiredVars = requiredVarsWith defaultOptions
+
+-- | Version of 'requiredVars' which accepts custom options.
+requiredVarsWith :: OptionsFromEnv is => ParseOptions -> Proxy is -> [Text]
+requiredVarsWith options p = appEndo (gatherRequired options [] p) []
 
 ----------------------------------------------------------------------------
 -- Instances
