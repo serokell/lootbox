@@ -58,8 +58,20 @@ type Branch2Fields = '[ "str4" ::: String
 
 type Sub3Fields = '[ "int4" ::: Int ]
 
+data DataFields = DataFields
+    { username :: Text
+    , phone    :: Int
+    } deriving Generic
+
+type FieldsWithData = '[ "int" ::: Int
+                       , "dat" ::< FromData DataFields
+                       ]
+
 cfg :: PartialConfig Fields
 cfg = mempty
+
+phoneL :: Functor f => (Int -> f Int) -> DataFields -> f DataFields
+phoneL f d = (\p -> d{ phone = p }) <$> f (phone d)
 
 
 unit_emptyPartial :: Assertion
@@ -191,6 +203,27 @@ hprop_mappendPartial = property $ do
     cgf12345 ^. tree #tre . option #str3 === Just str6
     cgf12345 ^. tree #tre . branch #brc1 . option #int3 === Just int2
     cgf12345 ^. tree #tre . branch #brc2 . option #str4 === Just str5
+
+hprop_Generics :: Property
+hprop_Generics = property $ do
+    txt <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    a <- forAll $ Gen.int Range.constantBounded
+    b <- forAll $ Gen.int Range.constantBounded
+    let cfg1 =
+          (mempty :: PartialConfig FieldsWithData)
+          & option #int ?~ a
+          & sub #dat .~ fromData DataFields
+              { username = txt
+              , phone = 0
+              }
+    cfg1 ^. sub #dat . option #phone === Just 0
+
+    let cfg2 = cfg1 & sub #dat . option #phone ?~ b
+    cfg2 ^. sub #dat . option #phone === Just b
+
+    let cfg3 = fromRight (error "should not occur") (finalise cfg2)
+    cfg3 ^. sub #dat . asData . phoneL === b
+    username (toData $ cfg3 ^. sub #dat) === txt
 
 -- | Helper for testing JSON decoding.
 testDecode :: String -> PartialConfig Fields -> Assertion
@@ -341,7 +374,7 @@ fieldsParser =
                #mem .:: (O.strOption $ long "mem"))
         ) <*<
     #kek .:: (O.option auto $ long "kek") <*<
-    #tre .:+ 
+    #tre .:+
         (#treType .:: (O.strOption $ long "treType") <*<
          #str3 .:: (O.strOption $ long "str3") <*<
          #brc1 .:-
