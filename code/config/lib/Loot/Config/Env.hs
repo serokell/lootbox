@@ -86,7 +86,7 @@ instance Buildable EnvParseError where
         -- maybe there are cases when it is mostly not :thinking:
         -- My idea is to add "isSecure" flag to 'EnvValue' typelass to resolve
         -- this problem.
-        "Failed to parse environmental variable \
+        "Failed to parse an environmental variable \
         \" +| errKey |+ "=" +| maybe "-" build errValue |+ "\
         \: " +| errMessage |+ ""
 
@@ -97,7 +97,7 @@ parseErrorPretty = pretty
 instance Exception EnvParseError where
     displayException = fmt . build
 
--- | Environmental value parser.
+-- | Parser for an environment variable.
 --
 -- Use 'fail' to report parsing errors, and 'noValue' to indicate
 -- that value is left uninitialized.
