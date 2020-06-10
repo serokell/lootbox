@@ -46,6 +46,7 @@ module Loot.Config.Env
          -- * Customized parsing
        , ParseOptions (..)
        , defaultOptions
+       , simpleKeyBuilder
        , parseEnvWith
        , parseEnvPureWith
        , requiredVarsWith
@@ -163,24 +164,28 @@ data ParseOptions = ParseOptions
       -- ^ Given a full path to the current configuration option in top-down order,
       --   construct expected name of the associated environmental variable.
       --
-      --   By default this acts as follows:
-      --
-      --   * @["myservice", "db", "username"]@ is associated with
-      --     @MYSERVICE_DB_USERNAME@ variable name;
-      --
-      --   * @["db", "_username"]@ is associated with @DB_USERNAME@,
-      --     stripping underscore is convenient for configs derived from
-      --     datatypes. If you need the extra underscore to appear in env
-      --     variable name, prepend the field with @"__"@.
+      --   For default behavior see 'simpleKeyBuilder'.
     }
 
 -- | Sensible default options for parsing.
 defaultOptions :: ParseOptions
 defaultOptions = ParseOptions
-    { keyBuilder =
-        let cutUnderscore t = T.stripPrefix "_" t ?: t
-        in mconcat . toList . NE.intersperse "_" . map (T.toUpper . cutUnderscore)
+    { keyBuilder = simpleKeyBuilder
     }
+
+-- | The default implementation for 'keyBuilder'. It behaves as follows:
+--
+--   * @["myservice", "db", "username"]@ is associated with
+--     @MYSERVICE_DB_USERNAME@ variable name;
+--
+--   * @["db", "_username"]@ is associated with @DB_USERNAME@,
+--     stripping underscore is convenient for configs derived from
+--     datatypes. If you need the extra underscore to appear in env
+--     variable name, prepend the field with @"__"@.
+simpleKeyBuilder :: NonEmpty Text -> Text
+simpleKeyBuilder =
+  let stripUnderscore t = T.stripPrefix "_" t ?: t
+  in mconcat . toList . NE.intersperse "_" . map (T.toUpper . stripUnderscore)
 
 -- | Internal type which represents a path to a config variable in __bottom-up__
 -- order.
