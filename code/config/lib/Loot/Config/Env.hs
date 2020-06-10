@@ -87,8 +87,8 @@ instance Buildable EnvParseError where
         -- My idea is to add "isSecure" flag to 'EnvValue' typelass to resolve
         -- this problem.
         "Failed to parse an environmental variable \
-        \" +| errKey |+ "=" +| maybe "-" build errValue |+ "\
-        \: " +| errMessage |+ ""
+        \"+|errKey|+"="+|maybe "-" build errValue|+"\
+        \: "+|errMessage|+""
 
 -- | Pretty-print a 'EnvParseError'.
 parseErrorPretty :: EnvParseError -> String
