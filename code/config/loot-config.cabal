@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 84b9622684f4111a4c0cb7337a9b50994d1538881763418fa9616e25cec28c3f
+-- hash: fd7410d6295d90d24f319c08eb844a3bd786e8c5dee5c8a5bf2fdd670c2be634
 
 name:           loot-config
 version:        0.0.0.0
@@ -59,6 +59,7 @@ test-suite loot-base-test
   main-is: Test.hs
   other-modules:
       Test.Loot.Config
+      Test.Loot.Config.Env
       Paths_loot_config
   hs-source-dirs:
       test

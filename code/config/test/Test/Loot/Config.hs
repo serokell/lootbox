@@ -11,18 +11,14 @@
 module Test.Loot.Config where
 
 import Data.Aeson (FromJSON, eitherDecode)
-import qualified Data.List as L
-import Fmt (build, fmt)
 import Loot.Base.HasLens (lensOf)
 import Options.Applicative (Parser, auto, defaultPrefs, execParserPure, getParseResult, info, long)
 import qualified Options.Applicative as O
 
 import Loot.Config
-import Loot.Config.Env hiding (Parser)
 
 import Hedgehog (Property, forAll, property, (===))
-import Test.Tasty (TestTree)
-import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, testCase, (@=?))
+import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, (@=?))
 
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -402,54 +398,3 @@ unit_cliOverrideModExisting = do
                    & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "hi")
                    & option #kek ?~ (SomeKek 777)
                    & tree #tre . branch #brc2 . sub #sub3 . option #int4 ?~ 12321
-
-----------------------
--- CLI modifications
-----------------------
-
-instance EnvValue SomeMem where
-    parseEnvValue = withPresent $ \arg ->
-        maybe (fail "Wrong prefix") (pure . SomeMem) $
-        L.stripPrefix "Mem " arg
-
-test_envParsing :: [TestTree]
-test_envParsing =
-    [ testCase "Can parse successfully" $ do
-          let cfg1 =
-                either (error . show) id . finalise $
-                either (error . fmt . build) id $
-                parseEnvPure @SubFields
-                    [ ("SUB2_STR2", "nyan")
-                    , ("SUB2_MEM", "Mem text")
-                    , ("BOOL", "0")
-                    , ("INT2", "5")
-                    ]
-          cfg1 ^. option #int2 @=? 5
-          cfg1 ^. option #bool @=? False
-          cfg1 ^. sub #sub2 . option #str2 @=? "nyan"
-          cfg1 ^. sub #sub2 . option #mem @=? SomeMem "text"
-
-    , testCase "Parse errors work" $
-          parseEnvPure @SubFields [("SUB2_MEM", "text")]
-              @=? Left EnvParseError
-                  { errKey = "SUB2_MEM", errValue = Just "text"
-                  , errMessage = "Wrong prefix" }
-
-    , testCase "Number parser do not allow overflow" $
-          (parseEnvPure @BranchFields [("INT3", replicate 20 '9')]
-              & first errMessage)
-              @=? Left "Numeric overflow"
-
-    , testCase "Can parse no value to Maybe" $ do
-          let cfg2 =
-                either (error . show) id . finalise $
-                either (error . fmt . build) id $
-                parseEnvPure @OptionalFields []
-          cfg2 ^. option #int @=? Nothing
-          cfg2 ^. option #str @=? Nothing
-    ]
-
-unit_requiredEnvVars :: Assertion
-unit_requiredEnvVars = do
-    requiredVars (Proxy @SubFields) @=?
-        ["INT2", "BOOL", "SUB2_STR2", "SUB2_MEM"]
