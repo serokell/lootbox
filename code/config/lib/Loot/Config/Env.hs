@@ -35,7 +35,7 @@ module Loot.Config.Env
        , requiredVars
 
          -- * Parsing individual values
-       , EnvValue (..)
+       , FromEnv (..)
        , Parser
        , noValue
        , withPresent
@@ -115,7 +115,7 @@ noValue :: Parser a
 noValue = Parser mzero
 
 -- | Describes a way to parse an item appearing in config.
-class EnvValue a where
+class FromEnv a where
     -- | Parse a variable value.
     parseEnvValue :: Maybe String -> Parser a
 
@@ -206,7 +206,7 @@ instance OptionsFromEnv '[] where
 instance
     forall l v is.
         ( KnownSymbol l
-        , EnvValue v
+        , FromEnv v
         , OptionsFromEnv is)
     => OptionsFromEnv ((l ::: v) ': is)
   where
@@ -332,50 +332,50 @@ requiredVarsWith options p = appEndo (gatherRequired options [] p) []
 -- Instances
 ----------------------------------------------------------------------------
 
-instance {-# OVERLAPPING #-} EnvValue String where
+instance {-# OVERLAPPING #-} FromEnv String where
     parseEnvValue = parseStringEnvValue
-instance EnvValue Text where
+instance FromEnv Text where
     parseEnvValue = parseStringEnvValue
-instance EnvValue LText where
+instance FromEnv LText where
     parseEnvValue = parseStringEnvValue
 
-instance EnvValue Int where
+instance FromEnv Int where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Int8 where
+instance FromEnv Int8 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Int16 where
+instance FromEnv Int16 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Int32 where
+instance FromEnv Int32 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Int64 where
+instance FromEnv Int64 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Integer where
+instance FromEnv Integer where
     parseEnvValue = autoParseEnvValue
-instance EnvValue Word where
+instance FromEnv Word where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Word8 where
+instance FromEnv Word8 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Word16 where
+instance FromEnv Word16 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Word32 where
+instance FromEnv Word32 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Word64 where
+instance FromEnv Word64 where
     parseEnvValue = parseBoundedNumEnvValue
-instance EnvValue Natural where
+instance FromEnv Natural where
     parseEnvValue val = do
         int <- autoParseEnvValue @Integer val
         if int < 0
         then fail "Negative number"
         else pure (fromIntegral int)
 
-instance EnvValue Float where
+instance FromEnv Float where
     parseEnvValue = autoParseEnvValue
-instance EnvValue Double where
+instance FromEnv Double where
     parseEnvValue = autoParseEnvValue
-instance Fixed.HasResolution a => EnvValue (Fixed.Fixed a) where
+instance Fixed.HasResolution a => FromEnv (Fixed.Fixed a) where
     parseEnvValue = autoParseEnvValue
 
-instance EnvValue Bool where
+instance FromEnv Bool where
     parseEnvValue = withPresent $ \case
       "0" -> pure False
       "1" -> pure True
@@ -387,10 +387,10 @@ instance EnvValue Bool where
 -- Never leaves config value uninitialized.
 --
 -- Note that if env variable is defined but empty, it will be parsed anyway.
-instance EnvValue a => EnvValue (Maybe a) where
+instance FromEnv a => FromEnv (Maybe a) where
     parseEnvValue = \case
         Nothing -> pure Nothing
         Just val -> parseEnvValue (Just val)
 
-instance EnvValue Aeson.Value where
+instance FromEnv Aeson.Value where
     parseEnvValue = aesonParseEnvValue

@@ -22,7 +22,7 @@ import Test.Tasty.HUnit (Assertion, testCase, (@?=))
 newtype Option1 = Option1 String
   deriving (Eq, Ord, Show, IsString, Generic, FromJSON)
 
-instance EnvValue Option1 where
+instance FromEnv Option1 where
     parseEnvValue = withPresent $ \arg ->
         maybe (fail "Wrong prefix") (pure . Option1) $
         L.stripPrefix "Mem " arg
