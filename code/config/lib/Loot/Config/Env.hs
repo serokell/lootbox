@@ -63,7 +63,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import Data.Vinyl (Rec ((:&), RNil))
-import Fmt (Buildable (..), fmt, pretty, (+|), (|+))
+import Fmt (Buildable (..), pretty, (+|), (|+))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import System.Environment (getEnvironment)
 
@@ -95,7 +95,7 @@ parseErrorPretty :: EnvParseError -> String
 parseErrorPretty = pretty
 
 instance Exception EnvParseError where
-    displayException = fmt . build
+    displayException = pretty
 
 -- | Parser for an environment variable.
 --
