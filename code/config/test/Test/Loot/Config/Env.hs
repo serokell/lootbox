@@ -17,7 +17,7 @@ import Loot.Config
 import Loot.Config.Env hiding (Parser)
 
 import Test.Tasty (TestTree)
-import Test.Tasty.HUnit (Assertion, testCase, (@=?))
+import Test.Tasty.HUnit (Assertion, testCase, (@?=))
 
 newtype Option1 = Option1 String
   deriving (Eq, Ord, Show, IsString, Generic, FromJSON)
@@ -53,30 +53,30 @@ test_envParsing =
                     , ("BOOL", "0")
                     , ("OPTION1", "Mem text")
                     ]
-          cfg ^. option #bool @=? False
-          cfg ^. option #myStr @=? "nyan"
-          cfg ^. option #option1 @=? "text"
+          cfg ^. option #bool @?= False
+          cfg ^. option #myStr @?= "nyan"
+          cfg ^. option #option1 @?= "text"
 
     , testCase "Parse errors work" $
           parseEnvPure @SubFields [("OPTION1", "text")]
-              @=? Left EnvParseError
+              @?= Left EnvParseError
                   { errKey = "OPTION1", errValue = Just "text"
                   , errMessage = "Wrong prefix" }
 
     , testCase "Number parser does not allow overflow" $
           (parseEnvPure @Fields [("INT", replicate 20 '9')]
               & first errMessage)
-              @=? Left "Numeric overflow"
+              @?= Left "Numeric overflow"
 
     , testCase "Can parse no value to Maybe" $ do
           let cfg =
                 either (error . show) id . finalise $
                 either (error . fmt . build) id $
                 parseEnvPure @OptionalFields []
-          cfg ^. option #option @=? Nothing
+          cfg ^. option #option @?= Nothing
     ]
 
 unit_requiredEnvVars :: Assertion
 unit_requiredEnvVars = do
-    requiredVars (Proxy @Fields) @=?
+    requiredVars (Proxy @Fields) @?=
         ["INT", "SUB_BOOL", "SUB_MYSTR", "SUB_OPTION1"]
