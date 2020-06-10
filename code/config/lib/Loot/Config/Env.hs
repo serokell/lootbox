@@ -2,6 +2,7 @@
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+{-# LANGUAGE AllowAmbiguousTypes  #-}
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE KindSignatures       #-}
 {-# LANGUAGE MonoLocalBinds       #-}
@@ -220,20 +221,20 @@ instance
       where
         parseOption :: Either EnvParseError (Maybe v)
         parseOption =
-            let key = mkEnvKey options path (Proxy @l)
+            let key = mkEnvKey @l options path
                 mvalue = Map.lookup key env
             in first (EnvParseError key mvalue) $
                 runExcept . runMaybeT $
                 runParser (parseEnvValue mvalue)
 
     gatherRequired options path _ =
-        Endo (mkEnvKey options path (Proxy @l) :) <>
+        Endo (mkEnvKey @l options path :) <>
         gatherRequired options path (Proxy @is)
 
 -- | Internal method which constructs a env key for config item.
-mkEnvKey :: KnownSymbol l => ParseOptions -> Path -> Proxy l -> Text
-mkEnvKey options path lp =
-    keyBuilder options . NE.fromList $ reverse (symbolValT lp : path)
+mkEnvKey :: forall l. KnownSymbol l => ParseOptions -> Path -> Text
+mkEnvKey options path =
+    keyBuilder options . NE.fromList $ reverse (symbolValT @l : path)
 
 instance
     forall l us is.
@@ -244,10 +245,10 @@ instance
     => OptionsFromEnv ((l ::< us) ': is)
   where
     envParser options env path = (:&)
-        <$> fmap ItemSub (envParser options env $ symbolValT (Proxy @l) : path)
+        <$> fmap ItemSub (envParser options env $ symbolValT @l : path)
         <*> envParser options env path
     gatherRequired options path _ =
-        gatherRequired options (symbolValT (Proxy @l) : path) (Proxy @us) <>
+        gatherRequired options (symbolValT @l : path) (Proxy @us) <>
         gatherRequired options path (Proxy @is)
 
 instance
@@ -259,10 +260,10 @@ instance
     => OptionsFromEnv ((l ::+ us) ': is)
   where
     envParser options env path = (:&)
-        <$> fmap ItemSumP (envParser options env $ symbolValT (Proxy @l) : path)
+        <$> fmap ItemSumP (envParser options env $ symbolValT @l : path)
         <*> envParser options env path
     gatherRequired options path _ =
-        gatherRequired options (symbolValT (Proxy @l) : path) usp <>
+        gatherRequired options (symbolValT @l : path) usp <>
         gatherRequired options path (Proxy @is)
       where
         usp = Proxy @(SumSelection l : us)
@@ -276,15 +277,15 @@ instance
     => OptionsFromEnv ((l ::- us) ': is)
   where
     envParser options env path = (:&)
-        <$> fmap ItemBranchP (envParser options env $ symbolValT (Proxy @l) : path)
+        <$> fmap ItemBranchP (envParser options env $ symbolValT @l : path)
         <*> envParser options env path
     gatherRequired options path _ =
-        gatherRequired options (symbolValT (Proxy @l) : path) (Proxy @us) <>
+        gatherRequired options (symbolValT @l : path) (Proxy @us) <>
         gatherRequired options path (Proxy @is)
 
 -- | Internal helper for demoting type-level text.
-symbolValT :: KnownSymbol l => Proxy l -> Text
-symbolValT = fromString . symbolVal
+symbolValT :: forall l. KnownSymbol l => Text
+symbolValT = fromString $ symbolVal (Proxy @l)
 
 -- | Parses configuration from environmental variables.
 --
