@@ -81,6 +81,7 @@ test-suite loot-base-test
   main-is: Test.hs
   other-modules:
       Test.Loot.Config
+      Test.Loot.Config.Env
       Paths_loot_config
   hs-source-dirs:
       test
