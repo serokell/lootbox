@@ -58,16 +58,17 @@ module Loot.Config.Env
        ) where
 
 import Control.Monad.Except (Except, runExcept, throwError)
-import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
-import qualified Data.Fixed as Fixed
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as Map
-import qualified Data.Text as T
 import Data.Vinyl (Rec ((:&), RNil))
 import Fmt (Buildable (..), pretty, (+|), (|+))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import System.Environment (getEnvironment)
+
+import qualified Data.Aeson as Aeson
+import qualified Data.Fixed as Fixed
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Map as Map
+import qualified Data.Text as T
 
 import Loot.Config.Record ((::+), (::-), (:::), (::<), ConfigKind (Partial), ConfigRec,
                            Item (ItemBranchP, ItemOptionP, ItemSub, ItemSumP), ItemKind,
