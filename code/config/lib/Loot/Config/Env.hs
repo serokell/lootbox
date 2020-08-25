@@ -9,7 +9,7 @@
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-{- | Utilities for reading configuration from environmental variables.
+{- | Utilities for reading configuration from environment variables.
 
 Imagine you have the following configuration:
 
@@ -24,7 +24,7 @@ type Options =
 @
 
 Then running 'parseEnv' will fill the it with the following
-environmental variables:
+environment variables:
 
 * APPNAME
 * DB_USERNAME
@@ -89,7 +89,7 @@ instance Buildable EnvParseError where
         -- maybe there are cases when it is mostly not :thinking:
         -- My idea is to add "isSecure" flag to 'EnvValue' typelass to resolve
         -- this problem.
-        "Failed to parse an environmental variable \
+        "Failed to parse an environment variable \
         \"+|errKey|+"="+|maybe "-" build errValue|+"\
         \: "+|errMessage|+""
 
@@ -122,7 +122,7 @@ class FromEnv a where
     -- | Parse a variable value.
     parseEnvValue :: Maybe String -> Parser a
 
--- | Apply the given parser to an environmental value if it present,
+-- | Apply the given parser to an environment value if it present,
 -- otherwise leave the configuration option uninitialized.
 --
 -- This is what most parsers usually do.
@@ -160,11 +160,11 @@ aesonParseEnvValue :: Aeson.FromJSON a => Maybe String -> Parser a
 aesonParseEnvValue =
     withPresent $ either fail pure . Aeson.eitherDecode . encodeUtf8
 
--- | Options which define the expected format of environmental variables.
+-- | Options which define the expected format of environment variables.
 data ParseOptions = ParseOptions
     { keyBuilder :: NonEmpty Text -> Text
       -- ^ Given a full path to the current configuration option in top-down order,
-      --   construct expected name of the associated environmental variable.
+      --   construct expected name of the associated environment variable.
       --
       --   For default behavior see 'simpleKeyBuilder'.
     }
@@ -288,7 +288,7 @@ instance
 symbolValT :: forall l. KnownSymbol l => Text
 symbolValT = fromString $ symbolVal (Proxy @l)
 
--- | Parses configuration from environmental variables.
+-- | Parses configuration from environment variables.
 --
 -- They will be parsed with respect to 'EnvValue'.
 -- Expected variable names are constructed following the rules defined
@@ -326,7 +326,7 @@ parseEnvPureWith
 parseEnvPureWith options env =
     envParser options (Map.fromList $ first fromString <$> env) []
 
--- | Returns names of all environmental variables which the given configuration
+-- | Returns names of all environment variables which the given configuration
 -- is going to read.
 requiredVars :: OptionsFromEnv is => Proxy is -> [Text]
 requiredVars = requiredVarsWith defaultOptions
