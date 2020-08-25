@@ -23,9 +23,9 @@ newtype Option1 = Option1 String
   deriving (Eq, Ord, Show, IsString, Generic, FromJSON)
 
 instance FromEnv Option1 where
-    parseEnvValue = withPresent $ \arg ->
+    parseEnvValue val =
         maybe (fail "Wrong prefix") (pure . Option1) $
-        L.stripPrefix "Mem " arg
+        L.stripPrefix "Mem " val
 
 type Fields =
    '[ "int" ::: Int
@@ -36,10 +36,6 @@ type SubFields =
    '[ "bool" ::: Bool
     , "myStr" ::: Text
     , "option1" ::: Option1
-    ]
-
-type OptionalFields =
-   '[ "option" ::: Maybe Int
     ]
 
 test_envParsing :: [TestTree]
@@ -60,7 +56,7 @@ test_envParsing =
     , testCase "Parsing errors works" $
           parseEnvPure @SubFields [("OPTION1", "text")]
               @?= Left EnvParseError
-                  { errKey = "OPTION1", errValue = Just "text"
+                  { errKey = "OPTION1", errValue = "text"
                   , errMessage = "Wrong prefix" }
 
     , testCase "Number parser does not allow overflow" $
@@ -68,12 +64,11 @@ test_envParsing =
               & first errMessage)
               @?= Left "Numeric overflow"
 
-    , testCase "Can parse no value to Nothing" $ do
+    , testCase "Absent value is not present in the config" $ do
           let cfg =
-                either (error . show) id . finalise $
                 either (error . fmt . build) id $
-                parseEnvPure @OptionalFields []
-          cfg ^. option #option @?= Nothing
+                parseEnvPure @Fields []
+          cfg ^. option #int @?= Nothing
     ]
 
 unit_requiredEnvVars :: Assertion

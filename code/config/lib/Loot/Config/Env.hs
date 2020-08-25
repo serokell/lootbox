@@ -17,7 +17,7 @@ Imagine you have the following configuration:
 type Options =
     '[ "appname" ::: Text
      , "db" ::<
-        '[ "username" ::: Text
+'[ "username" ::: Text
          , "password" ::: Text
          ]
      ]
@@ -38,8 +38,6 @@ module Loot.Config.Env
          -- * Parsing individual values
        , FromEnv (..)
        , Parser
-       , noValue
-       , withPresent
        , parseStringEnvValue
        , autoParseEnvValue
        , parseBoundedNumEnvValue
@@ -77,7 +75,7 @@ import Loot.Config.Record ((::+), (::-), (:::), (::<), ConfigKind (Partial), Con
 -- | A complete description of parsing error.
 data EnvParseError = EnvParseError
     { errKey     :: Text
-    , errValue   :: Maybe String
+    , errValue   :: String
     , errMessage :: Text
     } deriving (Show, Eq)
 
@@ -90,8 +88,7 @@ instance Buildable EnvParseError where
         -- My idea is to add "isSecure" flag to 'EnvValue' typelass to resolve
         -- this problem.
         "Failed to parse an environment variable \
-        \"+|errKey|+"="+|maybe "-" build errValue|+"\
-        \: "+|errMessage|+""
+        \"+|errKey|+"="+|errValue|+": "+|errMessage|+""
 
 -- | Pretty-print a 'EnvParseError'.
 parseErrorPretty :: EnvParseError -> String
@@ -102,42 +99,27 @@ instance Exception EnvParseError where
 
 -- | Parser for an environment variable.
 --
--- Use 'fail' to report parsing errors, and 'noValue' to indicate
--- that value is left uninitialized.
+-- Use 'fail' to report parsing errors.
 newtype Parser a = Parser
-    { runParser :: MaybeT (Except Text) a
-      -- ^ Parsing result, Maybe layer designates result presence, while Except
-      -- layer contains parsing errors.
+    { runParser :: Except Text a
+      -- ^ Parsing result, Except layer contains parsing errors.
     } deriving (Functor, Applicative, Monad)
 
 instance MonadFail Parser where
-    fail = Parser . lift . throwError . fromString
-
--- | Leave value uninitialized in config.
-noValue :: Parser a
-noValue = Parser mzero
+    fail = Parser . throwError . fromString
 
 -- | Describes a way to parse an item appearing in config.
 class FromEnv a where
     -- | Parse a variable value.
-    parseEnvValue :: Maybe String -> Parser a
-
--- | Apply the given parser to an environment value if it present,
--- otherwise leave the configuration option uninitialized.
---
--- This is what most parsers usually do.
-withPresent :: (String -> Parser a) -> Maybe String -> Parser a
-withPresent parser = \case
-    Nothing -> noValue
-    Just val -> parser val
+    parseEnvValue :: String -> Parser a
 
 -- | Value parser based on 'IsString' instance.
-parseStringEnvValue :: IsString a => Maybe String -> Parser a
-parseStringEnvValue = withPresent $ pure . fromString
+parseStringEnvValue :: IsString a => String -> Parser a
+parseStringEnvValue = pure . fromString
 
 -- | Value parser based on 'Read' instance.
-autoParseEnvValue :: Read a => Maybe String -> Parser a
-autoParseEnvValue = withPresent $ \arg -> case reads arg of
+autoParseEnvValue :: Read a => String -> Parser a
+autoParseEnvValue arg = case reads arg of
     -- This is similar to what e.g. optparse-applicative does,
     -- the errors from 'eitherRead' are not too beautiful
     [(r, "")] -> return r
@@ -148,7 +130,7 @@ autoParseEnvValue = withPresent $ \arg -> case reads arg of
 -- | Value parser for numbers with overflow checks.
 parseBoundedNumEnvValue
     :: forall a. (Bounded a, Integral a)
-    => Maybe String -> Parser a
+    => String -> Parser a
 parseBoundedNumEnvValue val = do
     int <- autoParseEnvValue @Integer val
     if | int < fromIntegral (minBound @a) -> fail "Numeric underflow"
@@ -156,9 +138,9 @@ parseBoundedNumEnvValue val = do
        | otherwise -> pure (fromIntegral int)
 
 -- | Value parser based on 'Aeson.FromJSON' instance.
-aesonParseEnvValue :: Aeson.FromJSON a => Maybe String -> Parser a
+aesonParseEnvValue :: Aeson.FromJSON a => String -> Parser a
 aesonParseEnvValue =
-    withPresent $ either fail pure . Aeson.eitherDecode . encodeUtf8
+    either fail pure . Aeson.eitherDecode . encodeUtf8
 
 -- | Options which define the expected format of environment variables.
 data ParseOptions = ParseOptions
@@ -221,12 +203,12 @@ instance
         (:&) <$> fmap ItemOptionP parseOption <*> envParser options env path
       where
         parseOption :: Either EnvParseError (Maybe v)
-        parseOption =
+        parseOption = do
             let key = mkEnvKey @l options path
-                mvalue = Map.lookup key env
-            in first (EnvParseError key mvalue) $
-                runExcept . runMaybeT $
-                runParser (parseEnvValue mvalue)
+            let mvalue = Map.lookup key env
+            forM mvalue $ \value ->
+              first (EnvParseError key value) $
+              runExcept . runParser $ parseEnvValue value
 
     gatherRequired options path _ =
         Endo (mkEnvKey @l options path :) <>
@@ -383,21 +365,12 @@ instance Fixed.HasResolution a => FromEnv (Fixed.Fixed a) where
     parseEnvValue = autoParseEnvValue
 
 instance FromEnv Bool where
-    parseEnvValue = withPresent $ \case
+    parseEnvValue = \case
       "0" -> pure False
       "1" -> pure True
       (map toLower -> "false") -> pure False
       (map toLower -> "true") -> pure True
       _ -> fail "Invalid boolean"
-
--- | Parses to @Nothing@ when value is not provided.
--- Never leaves config value uninitialized.
---
--- Note that if env variable is defined but empty, it will be parsed anyway.
-instance FromEnv a => FromEnv (Maybe a) where
-    parseEnvValue = \case
-        Nothing -> pure Nothing
-        Just val -> parseEnvValue (Just val)
 
 instance FromEnv Aeson.Value where
     parseEnvValue = aesonParseEnvValue
