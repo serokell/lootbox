@@ -44,7 +44,7 @@ type OptionalFields =
 
 test_envParsing :: [TestTree]
 test_envParsing =
-    [ testCase "Can parse successfully" $ do
+    [ testCase "Can parse simple config successfully" $ do
           let cfg =
                 either (error . show) id . finalise $
                 either (error . fmt . build) id $
@@ -57,7 +57,7 @@ test_envParsing =
           cfg ^. option #myStr @?= "nyan"
           cfg ^. option #option1 @?= "text"
 
-    , testCase "Parse errors work" $
+    , testCase "Parsing errors works" $
           parseEnvPure @SubFields [("OPTION1", "text")]
               @?= Left EnvParseError
                   { errKey = "OPTION1", errValue = Just "text"
@@ -68,7 +68,7 @@ test_envParsing =
               & first errMessage)
               @?= Left "Numeric overflow"
 
-    , testCase "Can parse no value to Maybe" $ do
+    , testCase "Can parse no value to Nothing" $ do
           let cfg =
                 either (error . show) id . finalise $
                 either (error . fmt . build) id $
