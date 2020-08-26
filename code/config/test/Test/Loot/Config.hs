@@ -58,6 +58,10 @@ type Branch2Fields = '[ "str4" ::: String
 
 type Sub3Fields = '[ "int4" ::: Int ]
 
+type OptionalFields = '[ "int" ::: Maybe Int
+                       , "str" ::: Maybe String
+                       ]
+
 cfg :: PartialConfig Fields
 cfg = mempty
 
@@ -341,7 +345,7 @@ fieldsParser =
                #mem .:: (O.strOption $ long "mem"))
         ) <*<
     #kek .:: (O.option auto $ long "kek") <*<
-    #tre .:+ 
+    #tre .:+
         (#treType .:: (O.strOption $ long "treType") <*<
          #str3 .:: (O.strOption $ long "str3") <*<
          #brc1 .:-
