@@ -23,6 +23,7 @@ import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Final, Partia
                            ConfigRec, complement, finalise, finaliseDeferredUnsafe,
                            option, sub, tree, upcast, branch, selection)
 import Loot.Config.Yaml ()
+import Loot.Config.Buildable ()
 
 
 type Config = ConfigRec 'Final

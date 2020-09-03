@@ -7,19 +7,22 @@
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MonoLocalBinds       #-}
+{-# LANGUAGE GADTs #-}
 
--- | Utilities for reading configuration from a file.
+-- | Utilities for parsing and serializing configuration with Yaml/JSON.
 module Loot.Config.Yaml
        ( configParser
        ) where
 
-import Data.Aeson (FromJSON (parseJSON))
+import qualified Data.Aeson.Types as A
+
+import Data.Aeson (FromJSON (parseJSON), ToJSON(toJSON))
 import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault, toAesonParser')
 import Data.Vinyl (Rec ((:&), RNil))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 
 import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Partial),
-                           ConfigRec, Item (ItemOptionP, ItemSub, ItemSumP, ItemBranchP),
+                           ConfigRec, Item (ItemOptionP, ItemOptionF, ItemSub, ItemSumP, ItemSumF, ItemBranchP, ItemBranchF),
                            ItemKind, SumSelection)
 
 
@@ -95,3 +98,75 @@ parseMulti p = keyOrDefault (fromString $ symbolVal p) mempty configParser
 
 instance OptionsFromJson is => FromJSON (ConfigRec 'Partial is) where
     parseJSON = toAesonParser' configParser
+
+class OptionsToJsonList (k :: ConfigKind) (is :: [ItemKind]) where
+  configToJsonList :: ConfigRec k is -> [A.Pair]
+
+instance OptionsToJsonList (k :: ConfigKind) '[] where
+  configToJsonList RNil = []
+
+instance
+  forall l v is k.
+        ( KnownSymbol l
+        , ToJSON v
+        , OptionsToJsonList k is)
+    => OptionsToJsonList k ((l ::: v) ': is)
+  where
+    configToJsonList (itemOption :& rest) =
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = case itemOption of
+            ItemOptionP mv -> toJSON <$> mv
+            ItemOptionF v -> Just $ toJSON v
+          restJson = configToJsonList @k @is rest
+      in case value of
+        Just v -> (label, v) : restJson
+        Nothing -> restJson
+
+instance
+    forall l us is k.
+        ( KnownSymbol l
+        , OptionsToJsonList k us
+        , OptionsToJsonList k is
+        )
+    => OptionsToJsonList k ((l ::< us) ': is)
+  where
+    configToJsonList (ItemSub inner :& rest) =
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = A.object $ configToJsonList inner
+      in (label, value) : configToJsonList rest
+
+instance
+    forall l us is k.
+        ( KnownSymbol l
+        , OptionsToJsonList k  (SumSelection l : us)
+        , OptionsToJsonList k is
+        )
+    => OptionsToJsonList k ((l ::+ us) ': is)
+  where
+    configToJsonList (itemSum :& rest) =
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = case itemSum of
+            ItemSumP inner -> A.object $ configToJsonList inner
+            ItemSumF inner -> A.object $ configToJsonList inner
+      in (label, value) : configToJsonList rest
+
+instance
+    forall l us is k.
+        ( KnownSymbol l
+        , OptionsToJsonList k us
+        , OptionsToJsonList k is
+        )
+    => OptionsToJsonList k ((l ::- us) ': is)
+  where
+    configToJsonList (itemBranch :& rest) =
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = case itemBranch of
+            ItemBranchP inner -> A.object $ configToJsonList inner
+            ItemBranchF (Just inner) -> A.object $ configToJsonList inner
+            ItemBranchF Nothing -> A.Null
+      in (label, value) : configToJsonList rest
+
+instance OptionsToJsonList k is => ToJSON (ConfigRec k is) where
+  toJSON config = A.object $ configToJsonList config
+
+

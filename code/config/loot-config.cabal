@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6ebb1bd44c4c2e80aacb126114954190d85eada672cfe689b45e287efaf555e5
+-- hash: ac50c131625e9f000b0fb84db6cc7dfeac6f02602e2e4586e1fd9c20b26b076c
 
 name:           loot-config
 version:        0.0.0.0
@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Loot.Config
+      Loot.Config.Buildable
       Loot.Config.CLI
       Loot.Config.Lens
       Loot.Config.Record
@@ -41,6 +42,7 @@ library
     , aeson-better-errors
     , base-noprelude
     , data-default
+    , fmt
     , loot-base
     , loot-prelude
     , microlens
@@ -62,6 +64,7 @@ test-suite loot-base-test
   build-depends:
       aeson
     , base-noprelude
+    , fmt
     , hedgehog
     , loot-base
     , loot-config
