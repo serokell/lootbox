@@ -10,21 +10,21 @@
 
 module Test.Loot.Config where
 
-import Data.Aeson (FromJSON, eitherDecode)
+import Data.Aeson (FromJSON, eitherDecode, encode, ToJSON)
 import Loot.Base.HasLens (lensOf)
 import Options.Applicative (Parser, auto, defaultPrefs, execParserPure, getParseResult, info, long)
 import qualified Options.Applicative as O
 
 import Loot.Config
 
-import Hedgehog (Property, forAll, property, (===))
+import Hedgehog (Property, forAll, property, (===), Gen)
 import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, (@=?))
 
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
-newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON)
-newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON)
+newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON, ToJSON)
+newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON, ToJSON)
 
 type Fields = '[ "str" ::: String
                , "int" ::: Int
@@ -61,6 +61,13 @@ type Sub3Fields = '[ "int4" ::: Int ]
 cfg :: PartialConfig Fields
 cfg = mempty
 
+cfgOptionPartial :: Gen (PartialConfig Fields)
+cfgOptionPartial = do 
+    str <- Gen.string (Range.linear 0 10) Gen.enumBounded
+    int <- Gen.int Range.constantBounded
+    pure $ cfg
+      & option #str ?~ str
+      & option #int ?~ int
 
 unit_emptyPartial :: Assertion
 unit_emptyPartial = do
@@ -248,6 +255,20 @@ unit_parseJsonTree3 =
         cfg & tree #tre . selection ?~ "brc1"
             & tree #tre . branch #brc1 . option #int3 ?~ 10
 
+testRoundtrip :: PartialConfig Fields -> Assertion
+testRoundtrip config = Right config @=? (eitherDecode . encode) config
+
+unit_jsonRoundtripEmptyPartial :: Assertion
+unit_jsonRoundtripEmptyPartial = testRoundtrip cfg
+
+hprop_jsonRoundtripOptionPartial :: Property
+hprop_jsonRoundtripOptionPartial = property $ do
+  config <- forAll cfgOptionPartial
+  (eitherDecode . encode) config === Right config
+
+unit_jsonRoundtripFullConfig :: Assertion
+unit_jsonRoundtripFullConfig = testRoundtrip fullConfig
+  
 -----------------------
 -- Finalisation
 -----------------------

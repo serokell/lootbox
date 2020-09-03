@@ -105,9 +105,6 @@ class OptionsToJsonList (k :: ConfigKind) (is :: [ItemKind]) where
 instance OptionsToJsonList (k :: ConfigKind) '[] where
   configToJsonList RNil = []
 
-undefinedValue :: A.Value
-undefinedValue = toJSON $ fromString @Text "<undefined>"
-
 instance
   forall l v is k.
         ( KnownSymbol l
@@ -116,10 +113,14 @@ instance
     => OptionsToJsonList k ((l ::: v) ': is)
   where
     configToJsonList (itemOption :& rest) =
-      let value = case itemOption of
-            ItemOptionP mv -> maybe undefinedValue toJSON mv
-            ItemOptionF v -> toJSON v
-      in (fromString $ symbolVal (Proxy :: Proxy l), value) : configToJsonList @k @is rest
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = case itemOption of
+            ItemOptionP mv -> toJSON <$> mv
+            ItemOptionF v -> Just $ toJSON v
+          restJson = configToJsonList @k @is rest
+      in case value of
+        Just v -> (label, v) : restJson
+        Nothing -> restJson
 
 instance
     forall l us is k.
@@ -160,9 +161,10 @@ instance
       let value = case itemBranch of
             ItemBranchP inner -> A.object $ configToJsonList inner
             ItemBranchF (Just inner) -> A.object $ configToJsonList inner
-            ItemBranchF Nothing -> undefinedValue
+            ItemBranchF Nothing -> A.Null
       in (fromString $ symbolVal (Proxy :: Proxy l), value) : configToJsonList rest
 
 instance OptionsToJsonList k is => ToJSON (ConfigRec k is) where
   toJSON config = A.object $ configToJsonList config
+
 
