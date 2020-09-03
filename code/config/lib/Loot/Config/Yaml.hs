@@ -131,9 +131,9 @@ instance
     => OptionsToJsonList k ((l ::< us) ': is)
   where
     configToJsonList (ItemSub inner :& rest) =
-      ( fromString $ symbolVal (Proxy :: Proxy l)
-      , A.object $ configToJsonList inner
-      ) : configToJsonList rest
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = A.object $ configToJsonList inner
+      in (label, value) : configToJsonList rest
 
 instance
     forall l us is k.
@@ -144,10 +144,11 @@ instance
     => OptionsToJsonList k ((l ::+ us) ': is)
   where
     configToJsonList (itemSum :& rest) =
-      let value = case itemSum of
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = case itemSum of
             ItemSumP inner -> A.object $ configToJsonList inner
             ItemSumF inner -> A.object $ configToJsonList inner
-      in (fromString $ symbolVal (Proxy :: Proxy l), value) : configToJsonList rest
+      in (label, value) : configToJsonList rest
 
 instance
     forall l us is k.
@@ -158,11 +159,12 @@ instance
     => OptionsToJsonList k ((l ::- us) ': is)
   where
     configToJsonList (itemBranch :& rest) =
-      let value = case itemBranch of
+      let label = fromString $ symbolVal (Proxy :: Proxy l)
+          value = case itemBranch of
             ItemBranchP inner -> A.object $ configToJsonList inner
             ItemBranchF (Just inner) -> A.object $ configToJsonList inner
             ItemBranchF Nothing -> A.Null
-      in (fromString $ symbolVal (Proxy :: Proxy l), value) : configToJsonList rest
+      in (label, value) : configToJsonList rest
 
 instance OptionsToJsonList k is => ToJSON (ConfigRec k is) where
   toJSON config = A.object $ configToJsonList config
