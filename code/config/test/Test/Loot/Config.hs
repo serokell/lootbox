@@ -11,6 +11,7 @@
 module Test.Loot.Config where
 
 import Data.Aeson (FromJSON, eitherDecode, encode, ToJSON)
+import Fmt (Buildable, build, fmt)
 import Loot.Base.HasLens (lensOf)
 import Options.Applicative (Parser, auto, defaultPrefs, execParserPure, getParseResult, info, long)
 import qualified Options.Applicative as O
@@ -23,8 +24,8 @@ import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, (@=?))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
-newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON, ToJSON)
-newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON, ToJSON)
+newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON, ToJSON, Buildable)
+newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON, ToJSON, Buildable)
 
 type Fields = '[ "str" ::: Text
                , "int" ::: Int
@@ -283,6 +284,33 @@ hprop_jsonRoundtripOptionPartial = property $ do
 
 unit_jsonRoundtripFullConfig :: Assertion
 unit_jsonRoundtripFullConfig = testRoundtrip fullConfig
+
+-- | Helper for testing Fmt.Buildable instance.
+testBuild :: PartialConfig Fields -> [Text] -> Assertion
+testBuild config expected = unlines expected @=? (fmt . build) config
+
+unit_fmtBuildableEmptyConfig :: Assertion
+unit_fmtBuildableEmptyConfig = testBuild cfg expected
+  where
+    expected =
+      [ "str: <undefined>"
+      , "int: <undefined>"
+      , "sub:"
+      , "  int2: <undefined>"
+      , "  bool: <undefined>"
+      , "  sub2:"
+      , "    str2: <undefined>"
+      , "    mem: <undefined>"
+      , "kek: <undefined>"
+      , "tre:"
+      , "  treType: <undefined>"
+      , "  str3: <undefined>"
+      , "  brc1: int3: <undefined>"
+      , "  brc2:"
+      , "    str4: <undefined>"
+      , "    sub3: int4: <undefined>"
+      ]
+  
   
 -----------------------
 -- Finalisation

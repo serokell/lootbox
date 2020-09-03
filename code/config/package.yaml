@@ -9,6 +9,7 @@ library:
     - aeson
     - aeson-better-errors
     - data-default
+    - fmt
     - loot-base
     - microlens
     - optparse-applicative
@@ -30,4 +31,5 @@ tests:
       - tasty-hunit
 
       - aeson
+      - fmt
       - optparse-applicative
