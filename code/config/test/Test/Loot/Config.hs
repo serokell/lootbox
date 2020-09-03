@@ -68,6 +68,20 @@ cfgOptionPartial = do
     pure $ cfg
       & option #str ?~ str
       & option #int ?~ int
+      
+fullConfig :: ConfigRec 'Partial Fields
+fullConfig =
+    cfg & option #str ?~ "hey"
+        & option #int ?~ 12345
+        & option #kek ?~ (SomeKek 999)
+        & sub #sub . option #bool ?~ False
+        & sub #sub . option #int2 ?~ 13579
+        & sub #sub . sub #sub2 . option #str2 ?~ ""
+        & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "bye")
+        & tree #tre . selection ?~ "brc1"
+        & tree #tre . option #str3 ?~ "lemon"
+        & tree #tre . branch #brc1 . option #int3 ?~ 54321
+
 
 unit_emptyPartial :: Assertion
 unit_emptyPartial = do
@@ -255,6 +269,7 @@ unit_parseJsonTree3 =
         cfg & tree #tre . selection ?~ "brc1"
             & tree #tre . branch #brc1 . option #int3 ?~ 10
 
+-- | Helper for testing JSON roundtrip.
 testRoundtrip :: PartialConfig Fields -> Assertion
 testRoundtrip config = Right config @=? (eitherDecode . encode) config
 
@@ -302,19 +317,6 @@ unit_finaliseSome = do
         , "tre.str3"
         , "tre.brc1.int3"
         ]
-
-fullConfig :: ConfigRec 'Partial Fields
-fullConfig =
-    cfg & option #str ?~ "hey"
-        & option #int ?~ 12345
-        & option #kek ?~ (SomeKek 999)
-        & sub #sub . option #bool ?~ False
-        & sub #sub . option #int2 ?~ 13579
-        & sub #sub . sub #sub2 . option #str2 ?~ ""
-        & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "bye")
-        & tree #tre . selection ?~ "brc1"
-        & tree #tre . option #str3 ?~ "lemon"
-        & tree #tre . branch #brc1 . option #int3 ?~ 54321
 
 unit_finalise :: Assertion
 unit_finalise = do
