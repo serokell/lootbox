@@ -26,7 +26,7 @@ import qualified Hedgehog.Range as Range
 newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON, ToJSON)
 newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON, ToJSON)
 
-type Fields = '[ "str" ::: String
+type Fields = '[ "str" ::: Text
                , "int" ::: Int
                , "sub" ::< SubFields
                , "kek" ::: SomeKek
@@ -38,13 +38,13 @@ type SubFields = '[ "int2" ::: Int
                   , "sub2" ::< Sub2Fields
                   ]
 
-type Sub2Fields = '[ "str2" ::: String
+type Sub2Fields = '[ "str2" ::: Text
                    , "mem"  ::: SomeMem
                    ]
 
 type SumTree = "tre" ::+ TreeFields
 
-type TreeFields = '[ "str3" ::: String
+type TreeFields = '[ "str3" ::: Text
                    , "brc1" ::- BranchFields
                    , "brc2" ::- Branch2Fields
                    ]
@@ -52,7 +52,7 @@ type TreeFields = '[ "str3" ::: String
 type BranchFields = '[ "int3" ::: Int
                      ]
 
-type Branch2Fields = '[ "str4" ::: String
+type Branch2Fields = '[ "str4" ::: Text
                       , "sub3" ::< Sub3Fields
                       ]
 
@@ -63,10 +63,10 @@ cfg = mempty
 
 cfgOptionPartial :: Gen (PartialConfig Fields)
 cfgOptionPartial = do 
-    str <- Gen.string (Range.linear 0 10) Gen.enumBounded
+    text <- Gen.text (Range.linear 0 10) Gen.enumBounded
     int <- Gen.int Range.constantBounded
     pure $ cfg
-      & option #str ?~ str
+      & option #str ?~ text
       & option #int ?~ int
       
 fullConfig :: ConfigRec 'Partial Fields
@@ -122,17 +122,17 @@ unit_lensesEmptyPartial = do
 
 hprop_lensOptionPartial :: Property
 hprop_lensOptionPartial = property $ do
-    str <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg1 = cfg & option #str ?~ str
-    cfg1 ^. option #str === Just str
+    text <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg1 = cfg & option #str ?~ text
+    cfg1 ^. option #str === Just text
 
     int <- forAll $ Gen.int Range.constantBounded
     let cfg2 = cfg1 & option #int ?~ int
-    cfg2 ^. option #str === Just str
+    cfg2 ^. option #str === Just text
     cfg2 ^. option #int === Just int
 
     let cfg3 = cfg1 & option #int .~ Nothing
-    cfg3 ^. option #str === Just str
+    cfg3 ^. option #str === Just text
     cfg3 ^. option #int === Nothing
 
 hprop_lensSubOptionPartial :: Property
@@ -141,77 +141,77 @@ hprop_lensSubOptionPartial = property $ do
     let cfg1 = cfg & sub #sub . option #int2 ?~ int
     cfg1 ^. sub #sub . option #int2 === Just int
 
-    str <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg2 = cfg1 & sub #sub . sub #sub2 . option #str2 ?~ str
+    text <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg2 = cfg1 & sub #sub . sub #sub2 . option #str2 ?~ text
     cfg2 ^. sub #sub . option #int2 === Just int
-    cfg2 ^. sub #sub . sub #sub2 . option #str2 === Just str
+    cfg2 ^. sub #sub . sub #sub2 . option #str2 === Just text
 
 hprop_lensTreeOptionPartial :: Property
 hprop_lensTreeOptionPartial = property $ do
-    str <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg1 = cfg & tree #tre . option #str3 ?~ str
-    cfg1 ^. tree #tre . option #str3 === Just str
+    text <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg1 = cfg & tree #tre . option #str3 ?~ text
+    cfg1 ^. tree #tre . option #str3 === Just text
 
     int <- forAll $ Gen.int Range.constantBounded
     let cfg2 = cfg1 & tree #tre . branch #brc1 . option #int3 ?~ int
-    cfg2 ^. tree #tre . option #str3 === Just str
+    cfg2 ^. tree #tre . option #str3 === Just text
     cfg2 ^. tree #tre . branch #brc1 . option #int3 === Just int
 
-    str2 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg3 = cfg2 & tree #tre . branch #brc2 . option #str4 ?~ str2
-    cfg3 ^. tree #tre . branch #brc2 . option #str4 === Just str2
-    cfg3 ^. tree #tre . option #str3 === Just str
+    text2 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg3 = cfg2 & tree #tre . branch #brc2 . option #str4 ?~ text2
+    cfg3 ^. tree #tre . branch #brc2 . option #str4 === Just text2
+    cfg3 ^. tree #tre . option #str3 === Just text
     cfg3 ^. tree #tre . branch #brc1 . option #int3 === Just int
 
 
 hprop_mappendPartial :: Property
 hprop_mappendPartial = property $ do
-    str1 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg1 = cfg & option #str ?~ str1
+    text1 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg1 = cfg & option #str ?~ text1
 
     let cfg01 = cfg <> cfg1
-    cfg01 ^. option #str === Just str1
+    cfg01 ^. option #str === Just text1
     cfg01 ^. option #int === Nothing
 
-    str2 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    text2 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
     int <- forAll $ Gen.int Range.constantBounded
-    let cfg2 = cfg & option #str ?~ str2
+    let cfg2 = cfg & option #str ?~ text2
                    & option #int ?~ int
 
     let cfg02 = cfg <> cfg2
-    cfg02 ^. option #str === Just str2
+    cfg02 ^. option #str === Just text2
     cfg02 ^. option #int === Just int
 
     let cfg12 = cfg1 <> cfg2
     cfg12 === cfg02
 
-    str3 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg3 = cfg & sub #sub . sub #sub2 . option #str2 ?~ str3
+    text3 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg3 = cfg & sub #sub . sub #sub2 . option #str2 ?~ text3
 
     let cfg123 = cfg1 <> cfg2 <> cfg3
-    cfg123 ^. option #str === Just str2
+    cfg123 ^. option #str === Just text2
     cfg123 ^. option #int === Just int
-    cfg123 ^. sub #sub . sub #sub2 . option #str2 === Just str3
+    cfg123 ^. sub #sub . sub #sub2 . option #str2 === Just text3
 
-    str4 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
+    text4 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
     int2 <- forAll $ Gen.int Range.constantBounded
-    let cfg4 = cfg & tree #tre . option #str3 ?~ str4
+    let cfg4 = cfg & tree #tre . option #str3 ?~ text4
                    & tree #tre . branch #brc1 . option #int3 ?~ int2
-    cfg4 ^. tree #tre . option #str3 === Just str4
+    cfg4 ^. tree #tre . option #str3 === Just text4
     cfg4 ^. tree #tre . branch #brc1 . option #int3 === Just int2
 
-    str5 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    str6 <- forAll $ Gen.string (Range.linear 0 10) Gen.enumBounded
-    let cfg5 = cfg & tree #tre . branch #brc2 . option #str4 ?~ str5
-                   & tree #tre . option #str3 ?~ str6
+    text5 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    text6 <- forAll $ Gen.text (Range.linear 0 10) Gen.enumBounded
+    let cfg5 = cfg & tree #tre . branch #brc2 . option #str4 ?~ text5
+                   & tree #tre . option #str3 ?~ text6
 
     let cgf12345 = mconcat [cfg1, cfg2, cfg3, cfg4, cfg5]
-    cgf12345 ^. option #str === Just str2
+    cgf12345 ^. option #str === Just text2
     cgf12345 ^. option #int === Just int
-    cgf12345 ^. sub #sub . sub #sub2 . option #str2 === Just str3
-    cgf12345 ^. tree #tre . option #str3 === Just str6
+    cgf12345 ^. sub #sub . sub #sub2 . option #str2 === Just text3
+    cgf12345 ^. tree #tre . option #str3 === Just text6
     cgf12345 ^. tree #tre . branch #brc1 . option #int3 === Just int2
-    cgf12345 ^. tree #tre . branch #brc2 . option #str4 === Just str5
+    cgf12345 ^. tree #tre . branch #brc2 . option #str4 === Just text5
 
 -- | Helper for testing JSON decoding.
 testDecode :: String -> PartialConfig Fields -> Assertion
