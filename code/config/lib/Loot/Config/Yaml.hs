@@ -9,7 +9,7 @@
 {-# LANGUAGE MonoLocalBinds       #-}
 {-# LANGUAGE GADTs #-}
 
--- | Utilities for reading configuration from a file.
+-- | Utilities for parsing and serializing configuration with Yaml/JSON.
 module Loot.Config.Yaml
        ( configParser
        ) where
