@@ -33,6 +33,7 @@ module Loot.Config.Record
 
        , ItemType
 
+       , LabelsKnown
        , finalise
        , finaliseDeferredUnsafe
        , complement

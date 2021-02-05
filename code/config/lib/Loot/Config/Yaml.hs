@@ -11,6 +11,7 @@
 -- | Utilities for reading configuration from a file.
 module Loot.Config.Yaml
        ( configParser
+       , OptionsFromJson
        ) where
 
 import Data.Aeson (FromJSON (parseJSON))
