@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6ebb1bd44c4c2e80aacb126114954190d85eada672cfe689b45e287efaf555e5
+-- hash: 307894133adc515bce8125fc12e960451e00e29e69adc56ed0ccbcb45501cb75
 
 name:           loot-config
 version:        0.0.0.0
@@ -34,7 +34,27 @@ library
       Paths_loot_config
   hs-source-dirs:
       lib
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base
   build-depends:
       aeson
@@ -45,6 +65,7 @@ library
     , loot-prelude
     , microlens
     , optparse-applicative
+    , unordered-containers
     , validation
     , vinyl
   default-language: Haskell2010
@@ -57,7 +78,27 @@ test-suite loot-base-test
       Paths_loot_config
   hs-source-dirs:
       test
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
@@ -71,4 +112,5 @@ test-suite loot-base-test
     , tasty-discover
     , tasty-hedgehog
     , tasty-hunit
+    , text
   default-language: Haskell2010
