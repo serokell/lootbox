@@ -10,7 +10,8 @@
 
 -- | Utilities for parsing and serializing configuration with Yaml/JSON.
 module Loot.Config.Yaml
-       ( configParser
+       ( OptionsFromJson (..)
+       , OptionsToJson (..)
        ) where
 
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value (Object))
