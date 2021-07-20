@@ -10,9 +10,10 @@
 
 module Test.Loot.Config where
 
-import Data.Aeson (FromJSON, eitherDecode)
+import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode)
 import Loot.Base.HasLens (lensOf)
 import Options.Applicative (Parser, auto, defaultPrefs, execParserPure, getParseResult, info, long)
+
 import qualified Options.Applicative as O
 
 import Loot.Config
@@ -23,8 +24,10 @@ import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, (@=?))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
-newtype SomeKek = SomeKek Integer deriving (Eq,Ord,Show,Read,Generic,FromJSON)
-newtype SomeMem = SomeMem String deriving (Eq,Ord,Show,IsString,Generic,FromJSON)
+newtype SomeKek = SomeKek Integer
+  deriving (Eq, Ord, Show, Read, Generic, FromJSON, ToJSON)
+newtype SomeMem = SomeMem String
+  deriving (Eq, Ord, Show, IsString, Generic, FromJSON, ToJSON)
 
 type Fields = '[ "str" ::: String
                , "int" ::: Int
@@ -61,6 +64,18 @@ type Sub3Fields = '[ "int4" ::: Int ]
 cfg :: PartialConfig Fields
 cfg = mempty
 
+fullConfig :: ConfigRec 'Partial Fields
+fullConfig =
+  cfg & option #str ?~ "hey"
+      & option #int ?~ 12345
+      & option #kek ?~ SomeKek 999
+      & sub #sub . option #bool ?~ False
+      & sub #sub . option #int2 ?~ 13579
+      & sub #sub . sub #sub2 . option #str2 ?~ ""
+      & sub #sub . sub #sub2 . option #mem ?~ SomeMem "bye"
+      & tree #tre . selection ?~ "brc1"
+      & tree #tre . option #str3 ?~ "lemon"
+      & tree #tre . branch #brc1 . option #int3 ?~ 54321
 
 unit_emptyPartial :: Assertion
 unit_emptyPartial = do
@@ -248,6 +263,14 @@ unit_parseJsonTree3 =
         cfg & tree #tre . selection ?~ "brc1"
             & tree #tre . branch #brc1 . option #int3 ?~ 10
 
+unit_toJson :: Assertion
+unit_toJson = case finalise fullConfig of
+  Left _ -> assertFailure "Something wrong with config required for test"
+  Right finalConfig ->
+    case eitherDecode $ encode finalConfig of
+      Left e -> assertFailure e
+      Right encodedDecodedConfig -> fullConfig @=? encodedDecodedConfig
+
 -----------------------
 -- Finalisation
 -----------------------
@@ -281,19 +304,6 @@ unit_finaliseSome = do
         , "tre.str3"
         , "tre.brc1.int3"
         ]
-
-fullConfig :: ConfigRec 'Partial Fields
-fullConfig =
-    cfg & option #str ?~ "hey"
-        & option #int ?~ 12345
-        & option #kek ?~ (SomeKek 999)
-        & sub #sub . option #bool ?~ False
-        & sub #sub . option #int2 ?~ 13579
-        & sub #sub . sub #sub2 . option #str2 ?~ ""
-        & sub #sub . sub #sub2 . option #mem ?~ (SomeMem "bye")
-        & tree #tre . selection ?~ "brc1"
-        & tree #tre . option #str3 ?~ "lemon"
-        & tree #tre . branch #brc1 . option #int3 ?~ 54321
 
 unit_finalise :: Assertion
 unit_finalise = do
@@ -341,7 +351,7 @@ fieldsParser =
                #mem .:: (O.strOption $ long "mem"))
         ) <*<
     #kek .:: (O.option auto $ long "kek") <*<
-    #tre .:+ 
+    #tre .:+
         (#treType .:: (O.strOption $ long "treType") <*<
          #str3 .:: (O.strOption $ long "str3") <*<
          #brc1 .:-
