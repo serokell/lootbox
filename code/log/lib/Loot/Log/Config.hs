@@ -100,6 +100,6 @@ instance Monoid LogConfig where
     mempty = LogConfig
         { backends    = []
         , minSeverity = Emergency
-        -- ^ the highest severity, so that the 'Monoid' laws are satisfied
+        --- ^ the highest severity, so that the 'Monoid' laws are satisfied
         }
     mappend = (<>)

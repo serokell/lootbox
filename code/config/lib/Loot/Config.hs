@@ -6,6 +6,7 @@
 -- | Flexible and convenient configuration framework.
 module Loot.Config
        ( module Loot.Config.Record
+       , module Loot.Config.Env
        , module Loot.Config.Lens
        , module Loot.Config.CLI
 
@@ -18,10 +19,11 @@ module Loot.Config
 import Lens.Micro ((?~))
 
 import Loot.Config.CLI
+import Loot.Config.Env (parseEnv, parseEnvPure)
 import Loot.Config.Lens
-import Loot.Config.Record ((:::), (::<), (::+), (::-), ConfigKind (Final, Partial),
-                           ConfigRec, complement, finalise, finaliseDeferredUnsafe,
-                           option, sub, tree, upcast, branch, selection)
+import Loot.Config.Record ((::+), (::-), (:::), (::<), ConfigKind (Final, Partial), ConfigRec,
+                           branch, complement, finalise, finaliseDeferredUnsafe, option, selection,
+                           sub, tree, upcast)
 import Loot.Config.Yaml ()
 
 
