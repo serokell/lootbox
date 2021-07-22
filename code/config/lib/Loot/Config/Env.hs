@@ -17,7 +17,7 @@ Imagine you have the following configuration:
 type Options =
     '[ "appname" ::: Text
      , "db" ::<
-'[ "username" ::: Text
+        '[ "username" ::: Text
          , "password" ::: Text
          ]
      ]
@@ -57,7 +57,7 @@ module Loot.Config.Env
 
 import Control.Monad.Except (Except, runExcept, throwError)
 import Data.Char (toLower)
-import Data.Vinyl (Rec ((:&), RNil))
+import Data.Vinyl (Rec (RNil, (:&)))
 import Fmt (Buildable (..), pretty, (+|), (|+))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import System.Environment (getEnvironment)
@@ -68,9 +68,9 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Text as T
 
-import Loot.Config.Record ((::+), (::-), (:::), (::<), ConfigKind (Partial), ConfigRec,
+import Loot.Config.Record (ConfigKind (Partial), ConfigRec,
                            Item (ItemBranchP, ItemOptionP, ItemSub, ItemSumP), ItemKind,
-                           SumSelection)
+                           SumSelection, (::+), (::-), (:::), (::<))
 
 -- | A complete description of parsing error.
 data EnvParseError = EnvParseError
