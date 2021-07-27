@@ -12,6 +12,7 @@ library:
     - loot-base
     - microlens
     - optparse-applicative
+    - unordered-containers
     - validation
     - vinyl
 
@@ -30,4 +31,5 @@ tests:
       - tasty-hunit
 
       - aeson
+      - text
       - optparse-applicative

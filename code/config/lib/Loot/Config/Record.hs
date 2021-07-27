@@ -33,6 +33,8 @@ module Loot.Config.Record
 
        , ItemType
 
+       , LabelsKnown
+
        , finalise
        , finaliseDeferredUnsafe
        , complement
@@ -55,7 +57,7 @@ module Loot.Config.Record
 
 import Data.Default (Default (..))
 import Data.Validation (Validation (Failure, Success), toEither)
-import Data.Vinyl (Label, Rec ((:&), RNil))
+import Data.Vinyl (Label, Rec (RNil, (:&)))
 import Data.Vinyl.Lens (RecElem, rlens, rreplace, type (<:))
 import Data.Vinyl.TypeLevel (RIndex)
 import GHC.TypeLits (AppendSymbol, ErrorMessage ((:<>:), ShowType, Text),
