@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2021 Serokell <https://serokell.io>
+#
+# SPDX-License-Identifier: Unlicense
+
+steps:
+  - simple_align:
+      cases: false
+      top_level_patterns: false
+      records: false
+  - imports:
+      align: none
+      list_align: after_alias
+      pad_module_names: false
+      long_list_align: inline
+      empty_list_align: inherit
+      list_padding: 2
+      separate_lists: true
+      space_surround: false
+  - trailing_whitespace: {}
+columns: 80
+newline: native
+language_extensions:
+  - BangPatterns
+  - ConstraintKinds
+  - DataKinds
+  - DefaultSignatures
+  - DeriveDataTypeable
+  - DeriveGeneric
+  - DerivingStrategies
+  - EmptyCase
+  - ExistentialQuantification
+  - ExplicitNamespaces
+  - FlexibleContexts
+  - FlexibleInstances
+  - FunctionalDependencies
+  - GADTs
+  - GeneralizedNewtypeDeriving
+  - LambdaCase
+  - MultiParamTypeClasses
+  - MultiWayIf
+  - NamedFieldPuns
+  - NoImplicitPrelude
+  - OverloadedLabels
+  - OverloadedStrings
+  - PatternSynonyms
+  - RecordWildCards
+  - RecursiveDo
+  - ScopedTypeVariables
+  - StandaloneDeriving
+  - TemplateHaskell
+  - TupleSections
+  - TypeApplications
+  - TypeFamilies
+  - TypeOperators
+  - ViewPatterns
