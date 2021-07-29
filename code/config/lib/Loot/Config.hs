@@ -17,6 +17,7 @@ module Loot.Config
 
 import Lens.Micro ((?~))
 
+import Loot.Config.Buildable ()
 import Loot.Config.CLI
 import Loot.Config.Generics
 import Loot.Config.Lens
@@ -24,7 +25,6 @@ import Loot.Config.Record (ConfigKind (..), ConfigRec, branch, complement,
                            finalise, finaliseDeferredUnsafe, option, selection,
                            sub, tree, upcast, (::+), (::-), (:::), (::<))
 import Loot.Config.Yaml ()
-
 
 type Config = ConfigRec 'Final
 

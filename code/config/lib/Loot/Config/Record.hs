@@ -1,5 +1,6 @@
 {- SPDX-License-Identifier: MPL-2.0 -}
 
+{-# LANGUAGE AllowAmbiguousTypes  #-}
 {-# LANGUAGE ConstraintKinds      #-}
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE FlexibleContexts     #-}
@@ -24,6 +25,7 @@ module Loot.Config.Record
   , SumSelection
 
   , ConfigRec
+  , getConfigKey
 
   , Item'
   , Item (..)
@@ -98,6 +100,10 @@ type (::-) = 'BranchType
 
 -- | Type of configuration records of 'ConfigKind' @k@.
 type ConfigRec k = Rec (Item k)
+
+-- | Helper function to get config key from type level
+getConfigKey :: forall l . KnownSymbol l => Text
+getConfigKey = fromString $ symbolVal (Proxy :: Proxy l)
 
 -- | Type family that interprets configuration items for vinyl records.
 type family Item' (k :: ConfigKind) (i :: ItemKind) where

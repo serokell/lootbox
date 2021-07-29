@@ -19,16 +19,13 @@ import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault,
                                 toAesonParser')
 import Data.Aeson.Types (Object)
 import Data.Vinyl (Rec (RNil, (:&)))
-import GHC.TypeLits (KnownSymbol, symbolVal)
+import GHC.TypeLits (KnownSymbol)
 
 import qualified Data.HashMap.Strict as HM
 
 import Loot.Config.Record (ConfigKind (..), ConfigRec, Item (..), ItemKind,
-                           SumSelection, (::+), (::-), (:::), (::<))
-
--- | Helper function to get config key from type level
-getConfigKey :: forall l . KnownSymbol l => Text
-getConfigKey = fromString $ symbolVal (Proxy :: Proxy l)
+                           SumSelection, getConfigKey, (::+), (::-), (:::),
+                           (::<))
 
 -- | This class is almost like 'FromJSON' but uses @aeson-better-errors@.
 class OptionsFromJson (is :: [ItemKind]) where

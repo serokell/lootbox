@@ -11,12 +11,11 @@
 module Test.Loot.Config where
 
 import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode)
-import Loot.Base.HasLens (lensOf)
+import Fmt (Buildable (..), fmt)
 import Options.Applicative (Parser, auto, defaultPrefs, execParserPure,
                             getParseResult, info, long)
 
 import qualified Data.Text as T
-import Loot.Config
 import qualified Options.Applicative as O
 
 import Hedgehog (Gen, Property, forAll, property, (===))
@@ -25,10 +24,13 @@ import Test.Tasty.HUnit (Assertion, assertEqual, assertFailure, (@=?))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
+import Loot.Base.HasLens (lensOf)
+import Loot.Config
+
 newtype SomeKek = SomeKek Integer
-  deriving (Eq, Ord, Show, Read, Generic, FromJSON, ToJSON)
+  deriving (Eq, Ord, Show, Read, Generic, FromJSON, ToJSON, Buildable)
 newtype SomeMem = SomeMem String
-  deriving (Eq, Ord, Show, IsString, Generic, FromJSON, ToJSON)
+  deriving (Eq, Ord, Show, IsString, Generic, FromJSON, ToJSON, Buildable)
 
 type Fields =
   '[ "str" ::: String
@@ -328,6 +330,32 @@ hprop_jsonRoundtripOptionPartial :: Property
 hprop_jsonRoundtripOptionPartial = property $ do
   config <- forAll cfgOptionPartial
   (eitherDecode . encode) config === Right config
+
+-- | Helper for testing Fmt.Buildable instance.
+testBuild :: PartialConfig Fields -> [Text] -> Assertion
+testBuild config expected = unlines expected @=? (fmt . build) config
+
+unit_fmtBuildableEmptyConfig :: Assertion
+unit_fmtBuildableEmptyConfig = testBuild cfg expected
+  where
+    expected =
+      [ "str: <undefined>"
+      , "int: <undefined>"
+      , "sub:"
+      , "  int2: <undefined>"
+      , "  bool: <undefined>"
+      , "  sub2:"
+      , "    str2: <undefined>"
+      , "    mem: <undefined>"
+      , "kek: <undefined>"
+      , "tre:"
+      , "  treType: <undefined>"
+      , "  str3: <undefined>"
+      , "  brc1: int3: <undefined>"
+      , "  brc2:"
+      , "    str4: <undefined>"
+      , "    sub3: int4: <undefined>"
+      ]
 
 -----------------------
 -- Finalisation
