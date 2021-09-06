@@ -6,26 +6,27 @@
 
 -- | Utilities for reading configuration from command-line parameters.
 module Loot.Config.CLI
-       ( ModParser
-       , OptModParser
-       , modifying
-       , uplift
-       , (..:)
-       , (.%:)
-       , (<*<)
-       , (.::)
-       , (%::)
-       , (.:<)
-       , (.:+)
-       , (.:-)
-       ) where
+  ( ModParser
+  , OptModParser
+  , modifying
+  , uplift
+  , (..:)
+  , (.%:)
+  , (<*<)
+  , (.::)
+  , (%::)
+  , (.:<)
+  , (.:+)
+  , (.:-)
+  ) where
 
-import Data.Vinyl (Label, type (<:), rreplace, rcast)
+import Data.Vinyl (Label, rcast, rreplace, type (<:))
 import Lens.Micro (ASetter')
 import Options.Applicative (Parser, optional)
 
-import Loot.Config.Record (ConfigKind (Partial), ConfigRec, HasOption, HasSub,
-                           HasSum, HasBranch, SumSelection, option, sub, tree, branch)
+import Loot.Config.Record (ConfigKind (..), ConfigRec, HasBranch, HasOption,
+                           HasSub, HasSum, SumSelection, branch, option, sub,
+                           tree)
 
 -- | Type for a parser which yields a modifier function instead of a
 -- value
@@ -92,56 +93,56 @@ type OptModParser cfg = ModParser (ConfigRec 'Partial cfg)
 -- | Combinator which declares a config parser which parses one config
 -- option, leaving other options empty.
 (.::)
-    :: forall l is v. HasOption l is v
-    => Label l
-    -> Parser v
-    -> OptModParser is
+  :: forall l is v. HasOption l is v
+  => Label l
+  -> Parser v
+  -> OptModParser is
 l .:: p = (\mv -> option l %~ (mv <|>)) <$> optional p
 infixr 6 .::
 
 -- | Combinator which declares a config parser which modifies one config
 -- option, not touching other options.
 (%::)
-    :: forall l is v. HasOption l is v
-    => Label l
-    -> ModParser v
-    -> OptModParser is
+  :: forall l is v. HasOption l is v
+  => Label l
+  -> ModParser v
+  -> OptModParser is
 l %:: p = (\mf -> option l %~ fmap (fromMaybe id mf)) <$> optional p
 infixr 6 %::
 
 -- | Combinator which declares a config parser which parses one
 -- subsection, leaving other options empty.
 (.:<)
-    :: forall l is us. (HasSub l is us)
-    => Label l
-    -> OptModParser us
-    -> OptModParser is
+  :: forall l is us. (HasSub l is us)
+  => Label l
+  -> OptModParser us
+  -> OptModParser is
 l .:< p = (\uf cfg -> cfg & sub l %~ uf) <$> p
 infixr 6 .:<
 
 -- | Combinator which declares a config parser which parses one
 -- tree, leaving other options empty.
 (.:+)
-    :: forall l is us ms. (HasSum l is ms, us ~ (SumSelection l : ms))
-    => Label l
-    -> OptModParser us
-    -> OptModParser is
+  :: forall l is us ms. (HasSum l is ms, us ~ (SumSelection l : ms))
+  => Label l
+  -> OptModParser us
+  -> OptModParser is
 l .:+ p = (\uf cfg -> cfg & tree l %~ uf) <$> p
 infixr 6 .:+
 
 -- | Combinator which declares a config parser which parses one
 -- branch, leaving other options empty.
 (.:-)
-    :: forall l is us. (HasBranch l is us)
-    => Label l
-    -> OptModParser us
-    -> OptModParser is
+  :: forall l is us. (HasBranch l is us)
+  => Label l
+  -> OptModParser us
+  -> OptModParser is
 l .:- p = (\uf cfg -> cfg & branch l %~ uf) <$> p
 infixr 6 .:-
 
 -- | Lifts the modifier of a subconfig to a modifier of larger config.
 uplift
-    :: forall is us. (is <: us)
-    => OptModParser is
-    -> OptModParser us
+  :: forall is us. (is <: us)
+  => OptModParser is
+  -> OptModParser us
 uplift = fmap $ \f cfg -> rreplace (f $ rcast cfg) cfg
