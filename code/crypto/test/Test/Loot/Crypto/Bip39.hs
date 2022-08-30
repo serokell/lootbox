@@ -92,8 +92,8 @@ unit_bip_test_vectors :: (String -> IO ()) -> Assertion
 unit_bip_test_vectors step = forM_ bipTestVectors $ \(ent, mnemonic, seed, _) -> do
     step $ decodeUtf8 ent
 
-    let (ent', _) = decode ent
-    let (seed', _) = decode seed
+    let ent'  = either (error . fromString) id $ decode ent
+    let seed' = either (error . fromString) id $ decode seed
 
     mnemonic @=? unwords (entropyToMnemonic ent')
     seed' @=? mnemonicToSeed mnemonic "TREZOR"

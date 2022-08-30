@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d2ef8838e7b55581cae1504ed808a155045bac0bd7cf966c9191c7cc3a65d229
+-- hash: 02b81e7c9fe96b47044f136d0b883a85d89b2595d834a3fb62a7b05d44a0035f
 
 name:           loot-crypto
 version:        0.0.0.0
@@ -31,7 +31,27 @@ library
       Paths_loot_crypto
   hs-source-dirs:
       lib
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base
   build-depends:
       array
@@ -53,7 +73,27 @@ test-suite loot-crypto-test
       Paths_loot_crypto
   hs-source-dirs:
       test
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base-noprelude

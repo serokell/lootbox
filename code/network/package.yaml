@@ -20,6 +20,7 @@ library:
     - safe-exceptions
     - serialise
     - singletons
+    - singletons-base
     - stm
     - random
     - reflection

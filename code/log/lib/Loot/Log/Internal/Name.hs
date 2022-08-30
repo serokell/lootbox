@@ -11,14 +11,13 @@ module Loot.Log.Internal.Name
        , selectLogName
        ) where
 
-import Prelude hiding (toList)
+import Prelude hiding (fromList, toList)
 
 import Data.Aeson (FromJSON (..), ToJSON(..), Value (String))
 import Data.DList (DList)
 import Fmt (Buildable (build), fmt, (+|), (|+))
-import GHC.Exts (IsList (Item, fromList, toList), IsString (fromString))
-import GHC.Stack (CallStack, HasCallStack, getCallStack,
-                  SrcLoc (SrcLoc, srcLocModule, srcLocPackage, srcLocStartLine))
+import GHC.Exts (IsList (Item, fromList, toList))
+import GHC.Stack (SrcLoc (SrcLoc, srcLocModule, srcLocPackage, srcLocStartLine))
 import Text.Show (Show (show))
 
 import qualified Data.Text as T

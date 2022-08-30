@@ -17,11 +17,12 @@ module Loot.Config.Yaml
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value (Object))
 import Data.Aeson.BetterErrors (Parse, fromAesonParser, keyMay, keyOrDefault,
                                 toAesonParser')
+import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (Object)
 import Data.Vinyl (Rec (RNil, (:&)))
 import GHC.TypeLits (KnownSymbol)
 
-import qualified Data.HashMap.Strict as HM
+import qualified Data.Aeson.KeyMap as KM
 
 import Loot.Config.Record (ConfigKind (..), ConfigRec, Item (..), ItemKind,
                            SumSelection, getConfigKey, (::+), (::-), (:::),
@@ -101,7 +102,7 @@ instance OptionsFromJson is => FromJSON (ConfigRec 'Partial is) where
 
 -- Helper function to insert values in a JSON 'Object' by config key.
 insert' :: forall l v . (KnownSymbol l, ToJSON v) => v -> Object -> Object
-insert' value = HM.insert (getConfigKey @l) (toJSON value)
+insert' value = KM.insert (fromText $ getConfigKey @l) (toJSON value)
 
 -- | This class is helper which converts config to object
 class OptionsToJson (k :: ConfigKind) (is :: [ItemKind]) where
@@ -109,7 +110,7 @@ class OptionsToJson (k :: ConfigKind) (is :: [ItemKind]) where
   configToObject :: ConfigRec k is -> Object
 
 instance OptionsToJson (k :: ConfigKind) '[] where
-  configToObject RNil = HM.empty
+  configToObject RNil = KM.empty
 
 instance
   forall l v is k

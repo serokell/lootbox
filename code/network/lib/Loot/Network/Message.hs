@@ -21,13 +21,15 @@ module Loot.Network.Message
 
 import Codec.Serialise (DeserialiseFailure, Serialise (..), deserialiseOrFail)
 import qualified Data.ByteString.Lazy as BSL
-import Data.Dependent.Map (DSum ((:=>)))
+import Data.Dependent.Sum (DSum ((:=>)))
 import qualified Data.Dependent.Map as D
-import Data.GADT.Compare ((:~:) (Refl), GEq (..), GOrdering (..))
+import Data.GADT.Compare (GCompare (..), GEq (..), GOrdering (..))
 import Data.Reflection (reifyNat)
-import Data.Singletons.TypeLits hiding (natVal)
+import Data.Singletons (Sing)
 import Data.Tagged (Tagged (..))
-import Data.Type.Equality (testEquality)
+import Data.Type.Equality ((:~:) (Refl))
+import GHC.TypeLits.Singletons (SNat (..))
+import GHC.TypeNats (sameNat)
 
 -- todo require typeable?
 -- | Message is a type that has unique message type (expressed by
@@ -68,12 +70,13 @@ handlerDecoded action =
     handler $ \ex (Tagged bs :: Tagged (k,d) ByteString) ->
                 action ex (deserialiseOrFail $ BSL.fromStrict bs)
 
-instance GEq (Sing :: Nat -> *) where
-    geq = testEquality
+instance GEq SNat where
+    geq (SNat :: SNat n) (SNat :: SNat m) =
+        sameNat (Proxy :: Proxy n) (Proxy :: Proxy m)
 
-instance D.GCompare (Sing :: Nat -> *) where
+instance GCompare SNat where
     gcompare s1@(SNat :: SNat n) s2@(SNat :: SNat m) =
-        case testEquality s1 s2 of
+        case geq s1 s2 of
           Just Refl -> GEQ
           Nothing ->
             case compare (natVal (Proxy @n)) (natVal (Proxy @m)) of

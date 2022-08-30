@@ -22,7 +22,7 @@ module Loot.Config.CLI
 
 import Data.Vinyl (Label, rcast, rreplace, type (<:))
 import Lens.Micro (ASetter')
-import Options.Applicative (Parser, optional)
+import Options.Applicative (Parser)
 
 import Loot.Config.Record (ConfigKind (..), ConfigRec, HasBranch, HasOption,
                            HasSub, HasSum, SumSelection, branch, option, sub,
