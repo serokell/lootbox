@@ -21,9 +21,8 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async as A
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
-import Control.Monad.Except (runExceptT, throwError)
+import Control.Monad.Except (throwError)
 import Control.Monad.STM (retry)
-import Data.ByteString (ByteString)
 import Data.Default (Default (def))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map

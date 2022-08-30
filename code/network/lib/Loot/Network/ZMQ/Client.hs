@@ -22,7 +22,7 @@ import qualified Control.Concurrent.Async as A
 import qualified Control.Concurrent.STM.TQueue as TQ
 import Control.Concurrent.STM.TVar (modifyTVar)
 import Control.Lens (at, makeLenses, (-~))
-import Control.Monad.Except (runExceptT, throwError)
+import Control.Monad.Except (throwError)
 import Control.Monad.STM (retry)
 import Data.Default (Default (def))
 import qualified Data.HashMap.Strict as HMap
@@ -141,7 +141,7 @@ updateHeartbeat ZTCliSettings{..} states nodeId = do
 -- the interval.
 heartbeatWorker ::
        ZTCliSettings -> TVar (Map ZTNodeId HeartbeatState) -> CliRequestQueue -> IO ()
-heartbeatWorker ZTCliSettings{..} heartbeatInfo internalQueue = forever $ do
+heartbeatWorker ZTCliSettings{} heartbeatInfo internalQueue = forever $ do
     threadDelay 50000
     curTime <- getCurrentTimeMs
     let modMap :: [(ZTNodeId, HeartbeatState)]
@@ -507,7 +507,7 @@ runBroker ::
        )
     => m ()
 runBroker = do
-    gEnv@ZTGlobalEnv{..} <- view $ lensOf @ZTGlobalEnv
+    gEnv@ZTGlobalEnv{} <- view $ lensOf @ZTGlobalEnv
     cEnv@ZTNetCliEnv{..} <- view $ lensOf @ZTNetCliEnv
 
     let ztCliLog = ztLog ztCliLogging
