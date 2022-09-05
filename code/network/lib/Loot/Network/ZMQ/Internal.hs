@@ -9,7 +9,6 @@ module Loot.Network.ZMQ.Internal
 
 import Control.Monad.STM (retry)
 import qualified Data.List.NonEmpty as NE
-import GHC.Stack (HasCallStack, callStack)
 import qualified System.ZMQ4 as Z
 
 import Loot.Log.Internal (Logging (..), Message (..), Severity, selectLogName)

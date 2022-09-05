@@ -13,7 +13,7 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 
 import qualified Data.Text as T
-
+import GHC.Exts (IsList (..))
 
 unit_Name_root_fromString :: Assertion
 unit_Name_root_fromString =
@@ -35,7 +35,7 @@ hprop_Name_fromString = property $ do
 
     let name = fromString (toString (T.intercalate "." names)) :: Name
 
-    fromList names === name
+    GHC.Exts.fromList names === name
     concatNames names === (""+|name|+"")
   where
     concatNames :: [Text] -> Text
@@ -49,7 +49,7 @@ hprop_Name_build = property $ do
     names <- forAll $
         Gen.list (Range.linear 1 20) (Gen.text (Range.linear 0 10) Gen.unicode)
 
-    let name = fromList names :: Name
+    let name = GHC.Exts.fromList names :: Name
 
     concatNames names === (""+|name|+"")
   where

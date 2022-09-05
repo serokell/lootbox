@@ -59,5 +59,4 @@ import Loot.Network.ZMQ.Client (ZTNetCliEnv)
 import Loot.Network.ZMQ.Client hiding (ZTNetCliEnv (..), getPeers, registerClient, runBroker,
                                 updatePeers)
 import Loot.Network.ZMQ.Common
-import Loot.Network.ZMQ.Server (ZTNetServEnv)
 import Loot.Network.ZMQ.Server hiding (registerListener, runBroker)

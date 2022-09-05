@@ -38,7 +38,6 @@ import Loot.Log.Internal.Name
 import Loot.Log.Internal.Message
 
 import Fmt.Internal (FromBuilder (fromBuilder))
-import GHC.Stack (callStack)
 import Lens.Micro (ASetter', sets)
 import Monad.Capabilities (makeCap)
 

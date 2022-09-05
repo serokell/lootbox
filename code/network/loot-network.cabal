@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: ae5e1e9d98c657b4d9b12558a354f86a7b56cee4e81ebb06761a1eb8d83e24e1
+-- hash: f59c2a721a2df8a33fa463f8c4f4a059661bde531227876413446834c055c807
 
 name:           loot-network
 version:        0.0.0.0
@@ -41,7 +41,27 @@ library
       Paths_loot_network
   hs-source-dirs:
       lib
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base
   build-depends:
       async
@@ -62,6 +82,7 @@ library
     , safe-exceptions
     , serialise
     , singletons
+    , singletons-base
     , stm
     , tagged
     , text
@@ -78,7 +99,27 @@ test-suite loot-base-test
       Paths_loot_network
   hs-source-dirs:
       test
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       async
@@ -103,7 +144,27 @@ benchmark loot-net-bench
       Paths_loot_network
   hs-source-dirs:
       bench
-  default-extensions: ApplicativeDo BangPatterns DeriveGeneric FlexibleContexts FlexibleInstances FunctionalDependencies GeneralizedNewtypeDeriving LambdaCase MultiWayIf MultiParamTypeClasses NamedFieldPuns OverloadedLabels OverloadedStrings RankNTypes RecordWildCards ScopedTypeVariables TemplateHaskell TupleSections TypeApplications ViewPatterns
+  default-extensions:
+      ApplicativeDo
+      BangPatterns
+      DeriveGeneric
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiWayIf
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
   ghc-options: -Wall -hide-package base -threaded
   build-depends:
       base-noprelude

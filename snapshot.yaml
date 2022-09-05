@@ -1,16 +1,33 @@
 name: lootbox-snapshot
-resolver: lts-14.15
+resolver: lts-19.21
 
 packages:
   - co-log-sys-0.1.1.0
   - componentm-0.0.0.2
 
   - git: https://github.com/int-index/caps
-    commit: ab4345eabd58fc6f05d3b46bea2c5acdba3ec6f8
+    commit: a5eaad31dcef6046a8a01a65ec648219d06478ba
 
   - git: https://github.com/serokell/zeromq-haskell
     commit: 714ac20981b2d346609fd896a1af4d31eb6d1162
+  
+  - git: https://github.com/serokell/base-noprelude.git
+    commit: c8b06c4c8a271fce0c2f41ab18e88d58e64bac52 # 4.15.1.0
 
+  - git: https://github.com/co-log/co-log.git
+    commit: 65b89152d0ae61ac99a56fbe645ed28cfacd717e
+  # Required by co-log
+  - chronos-1.1.4
+  - co-log-core-0.3.1.0
+  - typerep-map-0.5.0.0
+  # Required by chronos
+  - bytebuild-0.3.10.0
+  - byteslice-0.2.7.0
+  - bytesmith-0.3.8.0
+  # Required by byte*
+  - run-st-0.1.1.0
+  - zigzag-0.0.1.0
+  - contiguous-0.6.1.1
   # for componentm
   - teardown-0.5.0.1
 
