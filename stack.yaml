@@ -3,6 +3,7 @@ resolver: snapshot.yaml
 extra-deps: []  # Please, use snapshot.yaml
 
 packages:
+  - code/async
   - code/base
   - code/config
   - code/crypto
