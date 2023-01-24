@@ -2,8 +2,10 @@ name: lootbox-snapshot
 resolver: lts-19.21
 
 packages:
+  - co-log-0.5.0.0
   - co-log-sys-0.1.1.0
   - componentm-0.0.0.2
+  - serialise-0.2.6.0
 
   - git: https://github.com/int-index/caps
     commit: a5eaad31dcef6046a8a01a65ec648219d06478ba
@@ -14,21 +16,23 @@ packages:
   - git: https://github.com/serokell/base-noprelude.git
     commit: c8b06c4c8a271fce0c2f41ab18e88d58e64bac52 # 4.15.1.0
 
-  - git: https://github.com/co-log/co-log.git
-    commit: 65b89152d0ae61ac99a56fbe645ed28cfacd717e
   # Required by co-log
-  - chronos-1.1.4
-  - co-log-core-0.3.1.0
+  - chronos-1.1.5
+  - co-log-core-0.3.2.0
   - typerep-map-0.5.0.0
   # Required by chronos
-  - bytebuild-0.3.10.0
-  - byteslice-0.2.7.0
-  - bytesmith-0.3.8.0
+  - bytebuild-0.3.12.0
+  - byteslice-0.2.9.0
+  - bytesmith-0.3.9.1
   # Required by byte*
   - run-st-0.1.1.0
   - zigzag-0.0.1.0
-  - contiguous-0.6.1.1
-  # for componentm
+  - contiguous-0.6.3.0
+  # Required by serialise
+  - cborg-0.2.8.0
+  # Required by cborg and and byteslice
+  - primitive-0.7.4.0
+  # For componentm
   - teardown-0.5.0.1
 
 flags:
